@@ -475,6 +475,7 @@ export function EleventhStreetSearch() {
                     onCheckedChange={() => toggleSelect(p.productCode)}
                     className="mt-1"
                   />
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={p.productImage300 || p.productImage}
                     alt={p.productName}

@@ -2,6 +2,11 @@ node_modules
 .next
 out
 dist
+*.tsbuildinfo
+.vercel
+.turbo
+.cache
+supabase/.temp/
 .env.local
 .env*.local
 npm-debug.log*

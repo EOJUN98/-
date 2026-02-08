@@ -249,6 +249,7 @@ export function CollectedProductsCard() {
                       className="mt-1"
                     />
                     {firstImage && (
+                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={firstImage}
                         alt={p.title_origin}

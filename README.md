@@ -9,6 +9,26 @@ npm install
 npm run dev
 ```
 
+## Troubleshooting
+
+### Error: Cannot find module './vendor-chunks/next.js'
+
+This is almost always a corrupted/stale Next build artifact. Remove `.next` and restart.
+
+```bash
+rm -rf .next
+npm run dev
+```
+
+If it keeps happening, also clear caches and reinstall:
+
+```bash
+rm -rf .next node_modules/.cache
+rm -rf node_modules package-lock.json
+npm install
+npm run dev
+```
+
 ## Required env
 
 Copy `.env.example` to `.env.local` and set Supabase values.

@@ -12,3 +12,13 @@ export interface MarketConfigSummary {
   defaultReturnFee: number;
   updatedAt: string | null;
 }
+
+export interface SourcingConfig {
+  pageDelayMs: number;
+  crawlDelayMs: number;
+  bulkMaxTarget: number;
+  pageSize: number;
+  autoConvert: boolean;
+  defaultMarginRate: number;
+  updatedAt: string | null;
+}

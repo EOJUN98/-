@@ -1,15 +1,20 @@
 import { MarketConfigPanel } from "@/components/settings/market-config-panel";
+import { SourcingConfigPanel } from "@/components/settings/sourcing-config-panel";
+import { getSourcingConfig } from "@/actions/settings";
 import { getMarketConfigSummaries } from "@/lib/queries/settings";
 
 export default async function SettingsPage() {
-  const { data, error } = await getMarketConfigSummaries();
+  const [{ data, error }, { data: sourcingConfig }] = await Promise.all([
+    getMarketConfigSummaries(),
+    getSourcingConfig(),
+  ]);
 
   return (
     <section className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">환경설정</h1>
         <p className="text-muted-foreground">
-          마켓 API 연동 정보와 기본 배송/반품 정책을 관리합니다.
+          마켓 API 연동, 수집 속도/수량 설정을 관리합니다.
         </p>
       </div>
 
@@ -19,6 +24,7 @@ export default async function SettingsPage() {
         </div>
       ) : null}
 
+      <SourcingConfigPanel initialConfig={sourcingConfig} />
       <MarketConfigPanel initialConfigs={data} />
     </section>
   );

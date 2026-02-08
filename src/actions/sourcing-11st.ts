@@ -11,6 +11,47 @@ import {
   type EleventhStreetProductDetail,
 } from "@/lib/api/eleventh-street-crawler";
 
+// ── Internal: Load user sourcing config ──
+
+type SupabaseClient = ReturnType<typeof createSupabaseServerClient>;
+
+interface SourcingSettings {
+  pageDelayMs: number;
+  crawlDelayMs: number;
+  bulkMaxTarget: number;
+  pageSize: number;
+  autoConvert: boolean;
+  defaultMarginRate: number;
+}
+
+const SOURCING_DEFAULTS: SourcingSettings = {
+  pageDelayMs: 300,
+  crawlDelayMs: 500,
+  bulkMaxTarget: 3000,
+  pageSize: 50,
+  autoConvert: true,
+  defaultMarginRate: 30,
+};
+
+async function loadSourcingSettings(supabase: SupabaseClient, userId: string): Promise<SourcingSettings> {
+  const { data } = await supabase
+    .from("user_sourcing_configs")
+    .select("page_delay_ms, crawl_delay_ms, bulk_max_target, page_size, auto_convert, default_margin_rate")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (!data) return SOURCING_DEFAULTS;
+
+  return {
+    pageDelayMs: data.page_delay_ms ?? 300,
+    crawlDelayMs: data.crawl_delay_ms ?? 500,
+    bulkMaxTarget: data.bulk_max_target ?? 3000,
+    pageSize: data.page_size ?? 50,
+    autoConvert: data.auto_convert ?? true,
+    defaultMarginRate: Number(data.default_margin_rate ?? 30),
+  };
+}
+
 const searchSchema = z.object({
   keyword: z
     .string()
@@ -111,6 +152,9 @@ export async function collect11stProducts(
     return { success: false, error: "로그인이 필요합니다" };
   }
 
+  // Load user sourcing settings
+  const settings = await loadSourcingSettings(supabase, user.id);
+
   const rows = parsed.data.products.map((p) => ({
     user_id: user.id,
     site_id: "11st",
@@ -142,9 +186,11 @@ export async function collect11stProducts(
     return { success: false, error: `저장 실패: ${error.message}` };
   }
 
-  // Auto-convert to products table
-  const rawIds = (data ?? []).map((r) => r.id);
-  await autoConvertRawToProducts(supabase, user.id, rawIds);
+  // Auto-convert to products table (if enabled)
+  if (settings.autoConvert) {
+    const rawIds = (data ?? []).map((r) => r.id);
+    await autoConvertRawToProducts(supabase, user.id, rawIds, settings.defaultMarginRate);
+  }
 
   return { success: true, insertedCount: data?.length ?? 0 };
 }
@@ -153,7 +199,7 @@ export async function collect11stProducts(
 
 const bulkCollectSchema = z.object({
   keyword: z.string().min(1),
-  totalTarget: z.number().int().min(1).max(3000).default(100),
+  totalTarget: z.number().int().min(1).max(10000).default(100),
   sortCd: z.enum(["CP", "A", "G", "I", "L", "R"]).default("CP"),
 });
 
@@ -184,12 +230,16 @@ export async function bulkCollect11stProducts(
     return { success: false, error: "로그인이 필요합니다" };
   }
 
-  const pageSize = 50;
+  // Load user sourcing settings
+  const settings = await loadSourcingSettings(supabase, user.id);
+  // 11st Open API pageSize is practically capped; clamp to avoid bad requests.
+  const pageSize = Math.min(settings.pageSize, 50);
+  const effectiveTarget = Math.min(parsed.data.totalTarget, settings.bulkMaxTarget);
   let totalCollected = 0;
   let currentPage = 1;
-  const maxPages = Math.ceil(parsed.data.totalTarget / pageSize);
+  const maxPages = Math.ceil(effectiveTarget / pageSize);
 
-  while (totalCollected < parsed.data.totalTarget && currentPage <= maxPages) {
+  while (totalCollected < effectiveTarget && currentPage <= maxPages) {
     const result = await searchProducts(parsed.data.keyword, {
       pageNum: currentPage,
       pageSize,
@@ -198,7 +248,7 @@ export async function bulkCollect11stProducts(
 
     if (!result.products || result.products.length === 0) break;
 
-    const remaining = parsed.data.totalTarget - totalCollected;
+    const remaining = effectiveTarget - totalCollected;
     const productsToCollect = result.products.slice(0, remaining);
 
     const rows = productsToCollect.map((p) => ({
@@ -237,16 +287,18 @@ export async function bulkCollect11stProducts(
       };
     }
 
-    // Auto-convert to products table
-    const rawIds = (data ?? []).map((r) => r.id);
-    await autoConvertRawToProducts(supabase, user.id, rawIds);
+    // Auto-convert to products table (if enabled)
+    if (settings.autoConvert) {
+      const rawIds = (data ?? []).map((r) => r.id);
+      await autoConvertRawToProducts(supabase, user.id, rawIds, settings.defaultMarginRate);
+    }
 
     totalCollected += data?.length ?? 0;
     currentPage++;
 
-    // Rate limit between pages
-    if (currentPage <= maxPages && totalCollected < parsed.data.totalTarget) {
-      await new Promise((resolve) => setTimeout(resolve, 300));
+    // Rate limit between pages (user-configured delay)
+    if (currentPage <= maxPages && totalCollected < effectiveTarget) {
+      await new Promise((resolve) => setTimeout(resolve, settings.pageDelayMs));
     }
   }
 
@@ -259,35 +311,51 @@ export async function bulkCollect11stProducts(
 
 // ── Internal: Convert raw_products → products ──
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function autoConvertRawToProducts(supabase: any, userId: string, rawIds: string[]): Promise<number> {
+async function autoConvertRawToProducts(
+  supabase: SupabaseClient,
+  userId: string,
+  rawIds: string[],
+  marginRate = 30
+): Promise<number> {
   if (rawIds.length === 0) return 0;
 
-  const { data: rawProducts } = await supabase
+  interface RawProductDbRow {
+    id: string;
+    external_id: string | null;
+    title_origin: string | null;
+    price_origin: number | string | null;
+    currency: string | null;
+    images_json: unknown;
+    raw_data: unknown;
+  }
+
+  const { data: rawProductsData } = await supabase
     .from("raw_products")
     .select("*")
     .eq("user_id", userId)
     .in("id", rawIds);
 
-  if (!rawProducts || rawProducts.length === 0) return 0;
+  const rawProducts = ((rawProductsData ?? []) as RawProductDbRow[]).filter(Boolean);
+  if (rawProducts.length === 0) return 0;
 
   // Filter out already-converted
-  const rawIdList = rawProducts.map((rp: { id: string }) => rp.id);
-  const { data: existingProducts } = await supabase
+  const rawIdList = rawProducts.map((rp) => rp.id);
+  const { data: existingProductsData } = await supabase
     .from("products")
     .select("raw_id")
     .eq("user_id", userId)
     .in("raw_id", rawIdList);
 
   const alreadyConverted = new Set(
-    (existingProducts ?? []).map((p: { raw_id: string }) => p.raw_id)
+    ((existingProductsData ?? []) as Array<{ raw_id: string | null }>)
+      .map((p) => p.raw_id)
+      .filter((value): value is string => Boolean(value))
   );
-  const newRawProducts = rawProducts.filter((rp: { id: string }) => !alreadyConverted.has(rp.id));
+  const newRawProducts = rawProducts.filter((rp) => !alreadyConverted.has(rp.id));
 
   if (newRawProducts.length === 0) return 0;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const productRows = newRawProducts.map((rp: any) => {
+  const productRows = newRawProducts.map((rp) => {
     const images = Array.isArray(rp.images_json) ? rp.images_json : [];
     const rawData = (rp.raw_data ?? {}) as Record<string, unknown>;
     const mainImages = Array.isArray(rawData.mainImages) ? rawData.mainImages as string[] : [];
@@ -297,18 +365,22 @@ async function autoConvertRawToProducts(supabase: any, userId: string, rawIds: s
       ? [...mainImages, ...detailImages]
       : images;
 
+    const priceOrigin = Number(rp.price_origin ?? 0);
+    const currency = (rp.currency ?? "USD").toUpperCase();
+    const baseName = rp.title_origin?.trim() || rp.external_id?.trim() || "수집 상품";
+
     return {
       user_id: userId,
       raw_id: rp.id,
       product_code: rp.external_id,
-      name: rp.title_origin,
-      cost_price: rp.price_origin,
-      exchange_rate: rp.currency === "KRW" ? 1 : 1400,
-      margin_rate: 30,
+      name: baseName,
+      cost_price: priceOrigin,
+      exchange_rate: currency == "KRW" ? 1 : 1400,
+      margin_rate: marginRate,
       shipping_fee: 0,
-      sale_price: rp.currency === "KRW"
-        ? Math.ceil(rp.price_origin * 1.3 / 100) * 100
-        : Math.ceil(rp.price_origin * 1400 * 1.3 / 100) * 100,
+      sale_price: currency === "KRW"
+        ? Math.ceil(priceOrigin * (1 + marginRate / 100) / 100) * 100
+        : Math.ceil(priceOrigin * 1400 * (1 + marginRate / 100) / 100) * 100,
       main_image_url: allImages[0] ?? null,
       sub_images_url: allImages.slice(1),
       stock_quantity: 999,
@@ -466,7 +538,9 @@ export async function batchCrawl11stDetails(
     return { success: false, error: "로그인이 필요합니다" };
   }
 
-  const results: BatchCrawlResult["results"] = [];
+  // Load user sourcing settings for crawl delay
+  const settings = await loadSourcingSettings(supabase, user.id);
+  const results: NonNullable<BatchCrawlResult["results"]> = [];
 
   for (const productCode of parsed.data.productCodes) {
     try {
@@ -498,13 +572,13 @@ export async function batchCrawl11stDetails(
         .eq("external_id", productCode);
 
       if (updateError) {
-        results!.push({
+        results.push({
           productCode,
           success: false,
           error: updateError.message,
         });
       } else {
-        results!.push({
+        results.push({
           productCode,
           success: true,
           mainImageCount: detail.mainImages.length,
@@ -512,15 +586,15 @@ export async function batchCrawl11stDetails(
         });
       }
     } catch (err) {
-      results!.push({
+      results.push({
         productCode,
         success: false,
         error: err instanceof Error ? err.message : "크롤링 실패",
       });
     }
 
-    // Rate limit: 500ms delay between requests
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Rate limit: user-configured crawl delay
+    await new Promise((resolve) => setTimeout(resolve, settings.crawlDelayMs));
   }
 
   return { success: true, results };

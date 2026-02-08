@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { encryptSecret } from "@/lib/security/crypto";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { MarketConfigSummary } from "@/types/settings";
+import type { MarketConfigSummary, SourcingConfig } from "@/types/settings";
 
 const saveMarketConfigSchema = z.object({
   marketCode: z.enum(["coupang", "smartstore"]),
@@ -187,5 +187,127 @@ export async function saveMarketConfigAction(input: z.infer<typeof saveMarketCon
   return {
     success: true as const,
     config: mapRowToSummary(writeResult.data)
+  };
+}
+
+// ── Sourcing Config ──
+
+const SOURCING_CONFIG_DEFAULTS: SourcingConfig = {
+  pageDelayMs: 300,
+  crawlDelayMs: 500,
+  bulkMaxTarget: 3000,
+  pageSize: 50,
+  autoConvert: true,
+  defaultMarginRate: 30,
+  updatedAt: null,
+};
+
+const saveSourcingConfigSchema = z.object({
+  pageDelayMs: z.number().int().min(100).max(5000).default(300),
+  crawlDelayMs: z.number().int().min(100).max(5000).default(500),
+  bulkMaxTarget: z.number().int().min(100).max(10000).default(3000),
+  pageSize: z.number().int().min(10).max(100).default(50),
+  autoConvert: z.boolean().default(true),
+  defaultMarginRate: z.number().min(0).max(100).default(30),
+});
+
+export async function getSourcingConfig(): Promise<{
+  data: SourcingConfig;
+  error?: string;
+}> {
+  const supabase = createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { data: SOURCING_CONFIG_DEFAULTS };
+  }
+
+  const { data, error } = await supabase
+    .from("user_sourcing_configs")
+    .select(
+      "page_delay_ms, crawl_delay_ms, bulk_max_target, page_size, auto_convert, default_margin_rate, updated_at"
+    )
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (error) {
+    return { data: SOURCING_CONFIG_DEFAULTS, error: error.message };
+  }
+
+  if (!data) {
+    return { data: SOURCING_CONFIG_DEFAULTS };
+  }
+
+  return {
+    data: {
+      pageDelayMs: data.page_delay_ms ?? 300,
+      crawlDelayMs: data.crawl_delay_ms ?? 500,
+      bulkMaxTarget: data.bulk_max_target ?? 3000,
+      pageSize: data.page_size ?? 50,
+      autoConvert: data.auto_convert ?? true,
+      defaultMarginRate: Number(data.default_margin_rate ?? 30),
+      updatedAt: data.updated_at ?? null,
+    },
+  };
+}
+
+export async function saveSourcingConfigAction(
+  input: z.infer<typeof saveSourcingConfigSchema>
+) {
+  const parsed = saveSourcingConfigSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      success: false as const,
+      error: parsed.error.issues.map((i) => i.message).join(", "),
+    };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false as const, error: "로그인이 필요합니다" };
+  }
+
+  const payload = {
+    user_id: user.id,
+    page_delay_ms: parsed.data.pageDelayMs,
+    crawl_delay_ms: parsed.data.crawlDelayMs,
+    bulk_max_target: parsed.data.bulkMaxTarget,
+    page_size: parsed.data.pageSize,
+    auto_convert: parsed.data.autoConvert,
+    default_margin_rate: parsed.data.defaultMarginRate,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await supabase
+    .from("user_sourcing_configs")
+    .upsert(payload, { onConflict: "user_id" })
+    .select(
+      "page_delay_ms, crawl_delay_ms, bulk_max_target, page_size, auto_convert, default_margin_rate, updated_at"
+    )
+    .single();
+
+  if (error) {
+    return { success: false as const, error: error.message };
+  }
+
+  revalidatePath("/settings");
+
+  return {
+    success: true as const,
+    config: {
+      pageDelayMs: data.page_delay_ms,
+      crawlDelayMs: data.crawl_delay_ms,
+      bulkMaxTarget: data.bulk_max_target,
+      pageSize: data.page_size,
+      autoConvert: data.auto_convert,
+      defaultMarginRate: Number(data.default_margin_rate),
+      updatedAt: data.updated_at,
+    } as SourcingConfig,
   };
 }

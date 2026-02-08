@@ -1,8 +1,8 @@
 "use client";
 
 import { useCollectionProgress } from "@/hooks/use-collection-progress";
-import { CollectionJobForm } from "@/components/sourcing/collection-job-form";
 import { ProgressCard } from "@/components/sourcing/progress-card";
+import { EleventhStreetSearch } from "@/components/sourcing/eleventh-street-search";
 
 export default function SourcingPage() {
   const { jobs, loading } = useCollectionProgress();
@@ -12,11 +12,11 @@ export default function SourcingPage() {
       <div>
         <h1 className="text-2xl font-semibold">수집 관리</h1>
         <p className="text-muted-foreground">
-          해외 사이트 상품을 자동 수집합니다. Chrome Extension이 설치되어 있어야 합니다.
+          상품 검색 및 수집을 지원합니다.
         </p>
       </div>
 
-      <CollectionJobForm />
+      <EleventhStreetSearch />
       <ProgressCard jobs={jobs} loading={loading} />
     </section>
   );

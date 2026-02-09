@@ -9,7 +9,7 @@ export default async function OrdersPage() {
     <section className="space-y-4">
       <div className="space-y-1">
         <h1 className="text-2xl font-semibold">주문 관리</h1>
-        <p className="text-slate-600">
+        <p className="text-muted-foreground">
           주문 수집 결과를 확인하고 배송 상태를 관리합니다.
         </p>
       </div>

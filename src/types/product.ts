@@ -44,5 +44,46 @@ export interface ProductDetailItem extends ProductListItem {
   subImagesUrl: string[];
   rawId: string | null;
   updatedAt: string | null;
+  policyId: string | null;
   publishLogs: ProductPublishLogItem[];
+}
+
+export interface PolicyPricingBreakdown {
+  costPrice: number;
+  exchangeRate: number;
+  purchaseCost: number;
+  marginAmount: number;
+  shippingFee: number;
+  platformFee: number;
+  salePrice: number;
+  profit: number;
+  marginRate: number;
+  platformFeeRate: number;
+}
+
+export interface MarketPrice {
+  marketCode: string;
+  marketLabel: string;
+  salePrice: number;
+  platformFeeRate: number;
+  profit: number;
+}
+
+export interface ProductPolicyDetail {
+  id: string;
+  name: string;
+  baseMarginRate: number;
+  baseMarginAmount: number;
+  useTieredMargin: boolean;
+  internationalShippingFee: number;
+  domesticShippingFee: number;
+  exchangeRate: number;
+  platformFeeRate: number;
+  targetMarkets: string[];
+  marginTiers: Array<{
+    minPrice: number;
+    maxPrice: number;
+    marginRate: number;
+    marginAmount: number;
+  }>;
 }

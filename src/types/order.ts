@@ -15,3 +15,16 @@ export interface OrderListItem {
   courierCode: string | null;
   createdAt: string;
 }
+
+export interface OrderItemDetail {
+  id: string;
+  marketProductName: string | null;
+  marketOptionName: string | null;
+  quantity: number;
+  unitPrice: number;
+}
+
+export interface OrderDetail extends OrderListItem {
+  personalCustomsCode: string | null;
+  items: OrderItemDetail[];
+}

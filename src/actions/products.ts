@@ -249,6 +249,74 @@ export async function generateProductOptimizationAction(
   };
 }
 
+// ── Quick inline update (name or sale_price only) ──
+
+const quickUpdateSchema = z.object({
+  id: z.string().uuid(),
+  field: z.enum(["name", "salePrice"]),
+  value: z.union([z.string(), z.number()]),
+});
+
+export async function quickUpdateProductAction(input: z.infer<typeof quickUpdateSchema>) {
+  const parsed = quickUpdateSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false as const, error: parsed.error.issues.map((i) => i.message).join(", ") };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false as const, error: "로그인이 필요합니다" };
+
+  const updatePayload: Record<string, unknown> = {};
+  if (parsed.data.field === "name") {
+    const name = String(parsed.data.value).trim();
+    if (name.length < 2) return { success: false as const, error: "상품명은 2자 이상이어야 합니다" };
+    updatePayload.name = name;
+  } else {
+    const price = Number(parsed.data.value);
+    if (!Number.isFinite(price) || price < 0) return { success: false as const, error: "유효한 가격을 입력해주세요" };
+    updatePayload.sale_price = Math.round(price);
+  }
+
+  const { data, error } = await supabase
+    .from("products")
+    .update(updatePayload)
+    .eq("id", parsed.data.id)
+    .eq("user_id", user.id)
+    .select("id, name, sale_price")
+    .single();
+
+  if (error || !data) {
+    return { success: false as const, error: error?.message ?? "상품을 찾지 못했습니다" };
+  }
+
+  revalidatePath("/products");
+  return {
+    success: true as const,
+    updatedName: data.name as string,
+    updatedSalePrice: Number(data.sale_price ?? 0),
+  };
+}
+
+// ── Soft delete ──
+
+export async function deleteProductAction(productId: string) {
+  const supabase = createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false as const, error: "로그인이 필요합니다" };
+
+  const { error } = await supabase
+    .from("products")
+    .update({ is_deleted: true })
+    .eq("id", productId)
+    .eq("user_id", user.id);
+
+  if (error) return { success: false as const, error: error.message };
+
+  revalidatePath("/products");
+  return { success: true as const };
+}
+
 export async function applyProductOptimizationAction(input: z.infer<typeof applyOptimizationSchema>) {
   const parsed = applyOptimizationSchema.safeParse(input);
   if (!parsed.success) {

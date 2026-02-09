@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 
-import { saveMarketConfigAction } from "@/actions/settings";
+import { saveMarketConfigAction, testMarketConnectionAction } from "@/actions/settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -59,6 +59,7 @@ function toMap(configs: MarketConfigSummary[]) {
 export function MarketConfigPanel({ initialConfigs }: MarketConfigPanelProps) {
   const [configs, setConfigs] = useState(initialConfigs);
   const [savingMarket, setSavingMarket] = useState<SupportedMarketCode | null>(null);
+  const [testingMarket, setTestingMarket] = useState<SupportedMarketCode | null>(null);
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
 
@@ -142,6 +143,26 @@ export function MarketConfigPanel({ initialConfigs }: MarketConfigPanelProps) {
         title: `${MARKET_META[marketCode].title} 저장 완료`,
         description: "민감 키는 암호화되어 저장되었습니다"
       });
+    });
+  }
+
+  async function testConnection(marketCode: SupportedMarketCode) {
+    setTestingMarket(marketCode);
+    const result = await testMarketConnectionAction(marketCode);
+    setTestingMarket(null);
+
+    if (!result.success) {
+      toast({
+        title: `${MARKET_META[marketCode].title} 연결 실패`,
+        description: result.error,
+        variant: "destructive"
+      });
+      return;
+    }
+
+    toast({
+      title: `${MARKET_META[marketCode].title} 연결 성공`,
+      description: result.message
     });
   }
 
@@ -240,9 +261,21 @@ export function MarketConfigPanel({ initialConfigs }: MarketConfigPanelProps) {
                   ? `최근 저장: ${new Date(config.updatedAt).toLocaleString("ko-KR")}`
                   : "저장 이력 없음"}
               </span>
-              <Button onClick={() => save(marketCode)} disabled={saving}>
-                {saving ? "저장 중..." : "저장"}
-              </Button>
+              <div className="flex gap-2">
+                {config?.isConfigured && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => testConnection(marketCode)}
+                    disabled={testingMarket === marketCode}
+                  >
+                    {testingMarket === marketCode ? "테스트 중..." : "연결 테스트"}
+                  </Button>
+                )}
+                <Button onClick={() => save(marketCode)} disabled={saving}>
+                  {saving ? "저장 중..." : "저장"}
+                </Button>
+              </div>
             </CardFooter>
           </Card>
         );

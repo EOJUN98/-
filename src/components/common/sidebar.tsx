@@ -10,7 +10,8 @@ import {
   Settings,
   LayoutDashboard,
   FileText,
-  ClipboardCheck
+  ClipboardCheck,
+  Upload
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +21,7 @@ const navItems = [
   { href: "/products", label: "상품 관리", icon: Package },
   { href: "/policies", label: "정책 관리", icon: FileText },
   { href: "/policy-apply", label: "정책 적용", icon: ClipboardCheck },
+  { href: "/product-update", label: "상품 업데이트", icon: Upload },
   { href: "/orders", label: "주문 관리", icon: ShoppingCart },
   { href: "/cs", label: "CS 관리", icon: MessageSquare },
   { href: "/settings", label: "환경설정", icon: Settings }

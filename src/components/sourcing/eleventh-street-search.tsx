@@ -7,8 +7,15 @@ import {
   batchCrawl11stDetails,
   bulkCollect11stProducts,
 } from "@/actions/sourcing-11st";
+import {
+  searchGmarketProducts,
+  collectGmarketProducts,
+  batchCrawlGmarketDetails,
+  bulkCollectGmarketProducts,
+} from "@/actions/sourcing-gmarket";
 import { createCollectionJob } from "@/actions/sourcing";
 import type { EleventhStreetProduct } from "@/lib/api/eleventh-street";
+import type { GmarketProduct } from "@/lib/api/gmarket";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,21 +48,30 @@ import {
   Zap,
 } from "lucide-react";
 
-type SiteId = "11st" | "aliexpress" | "taobao";
+type SiteId = "11st" | "gmarket" | "aliexpress" | "taobao";
 
 const SITE_OPTIONS: { value: SiteId; label: string }[] = [
   { value: "11st", label: "11번가" },
+  { value: "gmarket", label: "G마켓" },
   { value: "aliexpress", label: "AliExpress" },
   { value: "taobao", label: "Taobao" },
 ];
 
-const SORT_OPTIONS = [
+const SORT_OPTIONS_11ST = [
   { value: "CP", label: "추천순" },
   { value: "A", label: "최신순" },
   { value: "G", label: "평점순" },
   { value: "I", label: "할인율순" },
   { value: "L", label: "저가순" },
   { value: "R", label: "리뷰순" },
+] as const;
+
+const SORT_OPTIONS_GMARKET = [
+  { value: "recm", label: "추천순" },
+  { value: "date", label: "최신순" },
+  { value: "lowp", label: "저가순" },
+  { value: "highp", label: "고가순" },
+  { value: "popr", label: "인기순" },
 ] as const;
 
 interface CrawlStatus {
@@ -73,7 +89,7 @@ export function EleventhStreetSearch() {
   const [collecting, setCollecting] = useState(false);
   const [bulkCollecting, setBulkCollecting] = useState(false);
   const [crawling, setCrawling] = useState(false);
-  const [products, setProducts] = useState<EleventhStreetProduct[]>([]);
+  const [products, setProducts] = useState<(EleventhStreetProduct | GmarketProduct)[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [pageNum, setPageNum] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -82,7 +98,8 @@ export function EleventhStreetSearch() {
 
   const pageSize = 30;
   const totalPages = Math.ceil(totalCount / pageSize);
-  const is11st = siteId === "11st";
+  const isKeywordSite = siteId === "11st" || siteId === "gmarket";
+  const sortOptions = siteId === "gmarket" ? SORT_OPTIONS_GMARKET : SORT_OPTIONS_11ST;
 
   async function handleSearch(page?: number) {
     if (!keyword.trim()) return;
@@ -91,23 +108,37 @@ export function EleventhStreetSearch() {
     setCrawlStatus({});
 
     const targetPage = page ?? 1;
-    const result = await search11stProducts({
-      keyword: keyword.trim(),
-      pageNum: targetPage,
-      pageSize,
-      sortCd: sortCd as "CP" | "A" | "G" | "I" | "L" | "R",
-    });
 
-    setLoading(false);
-
-    if (!result.success) {
-      toast({ title: "검색 실패", description: result.error, variant: "destructive" });
-      return;
+    if (siteId === "gmarket") {
+      const result = await searchGmarketProducts({
+        keyword: keyword.trim(),
+        pageNum: targetPage,
+        sortType: sortCd as "recm" | "date" | "lowp" | "highp" | "popr",
+      });
+      setLoading(false);
+      if (!result.success) {
+        toast({ title: "검색 실패", description: result.error, variant: "destructive" });
+        return;
+      }
+      setProducts(result.products ?? []);
+      setTotalCount(result.totalCount ?? 0);
+      setPageNum(targetPage);
+    } else {
+      const result = await search11stProducts({
+        keyword: keyword.trim(),
+        pageNum: targetPage,
+        pageSize,
+        sortCd: sortCd as "CP" | "A" | "G" | "I" | "L" | "R",
+      });
+      setLoading(false);
+      if (!result.success) {
+        toast({ title: "검색 실패", description: result.error, variant: "destructive" });
+        return;
+      }
+      setProducts(result.products ?? []);
+      setTotalCount(result.totalCount ?? 0);
+      setPageNum(targetPage);
     }
-
-    setProducts(result.products ?? []);
-    setTotalCount(result.totalCount ?? 0);
-    setPageNum(targetPage);
   }
 
   async function handleBulkCollect() {
@@ -117,11 +148,19 @@ export function EleventhStreetSearch() {
     }
 
     setBulkCollecting(true);
-    const result = await bulkCollect11stProducts({
-      keyword: keyword.trim(),
-      totalTarget: bulkTarget,
-      sortCd: sortCd as "CP" | "A" | "G" | "I" | "L" | "R",
-    });
+
+    const result = siteId === "gmarket"
+      ? await bulkCollectGmarketProducts({
+          keyword: keyword.trim(),
+          totalTarget: bulkTarget,
+          sortType: sortCd as "recm" | "date" | "lowp" | "highp" | "popr",
+        })
+      : await bulkCollect11stProducts({
+          keyword: keyword.trim(),
+          totalTarget: bulkTarget,
+          sortCd: sortCd as "CP" | "A" | "G" | "I" | "L" | "R",
+        });
+
     setBulkCollecting(false);
 
     if (!result.success) {
@@ -185,7 +224,9 @@ export function EleventhStreetSearch() {
     }
 
     setCollecting(true);
-    const result = await collect11stProducts({ products: selectedProducts });
+    const result = siteId === "gmarket"
+      ? await collectGmarketProducts({ products: selectedProducts as GmarketProduct[] })
+      : await collect11stProducts({ products: selectedProducts as EleventhStreetProduct[] });
     setCollecting(false);
 
     if (!result.success) {
@@ -211,7 +252,9 @@ export function EleventhStreetSearch() {
 
     const selectedProducts = products.filter((p) => selected.has(p.productCode));
     setCollecting(true);
-    const collectResult = await collect11stProducts({ products: selectedProducts });
+    const collectResult = siteId === "gmarket"
+      ? await collectGmarketProducts({ products: selectedProducts as GmarketProduct[] })
+      : await collect11stProducts({ products: selectedProducts as EleventhStreetProduct[] });
     setCollecting(false);
 
     if (!collectResult.success) {
@@ -224,7 +267,9 @@ export function EleventhStreetSearch() {
     selectedCodes.forEach((code) => { statusUpdate[code] = "crawling"; });
     setCrawlStatus(statusUpdate);
 
-    const result = await batchCrawl11stDetails({ productCodes: selectedCodes });
+    const result = siteId === "gmarket"
+      ? await batchCrawlGmarketDetails({ productCodes: selectedCodes })
+      : await batchCrawl11stDetails({ productCodes: selectedCodes });
     setCrawling(false);
 
     if (!result.success) {
@@ -302,11 +347,13 @@ export function EleventhStreetSearch() {
         <div className="w-[200px] space-y-2">
           <Label>수집 사이트</Label>
           <Select value={siteId} onValueChange={(v) => {
-            setSiteId(v as SiteId);
+            const newSite = v as SiteId;
+            setSiteId(newSite);
             setProducts([]);
             setTotalCount(0);
             setSelected(new Set());
             setCrawlStatus({});
+            setSortCd(newSite === "gmarket" ? "recm" : "CP");
           }}>
             <SelectTrigger>
               <SelectValue />
@@ -322,7 +369,7 @@ export function EleventhStreetSearch() {
         </div>
 
         {/* 11st: Keyword Search */}
-        {is11st && (
+        {isKeywordSite && (
           <>
             <form
               onSubmit={(e) => { e.preventDefault(); handleSearch(); }}
@@ -345,7 +392,7 @@ export function EleventhStreetSearch() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {SORT_OPTIONS.map((opt) => (
+                    {sortOptions.map((opt) => (
                       <SelectItem key={opt.value} value={opt.value}>
                         {opt.label}
                       </SelectItem>
@@ -388,7 +435,7 @@ export function EleventhStreetSearch() {
         )}
 
         {/* AliExpress / Taobao: URL + Extension */}
-        {!is11st && (
+        {!isKeywordSite && (
           <form onSubmit={handleExtensionCollect} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-[1fr_180px]">
               <div className="space-y-2">
@@ -429,7 +476,7 @@ export function EleventhStreetSearch() {
         )}
 
         {/* 11st Results */}
-        {is11st && products.length > 0 && (
+        {isKeywordSite && products.length > 0 && (
           <>
             <div className="flex items-center justify-between flex-wrap gap-2">
               <p className="text-sm text-muted-foreground">
@@ -490,7 +537,7 @@ export function EleventhStreetSearch() {
                       {formatPrice(p.salePrice > 0 ? p.salePrice : p.productPrice)}
                     </p>
                     <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                      <span>{p.sellerNick}</span>
+                      <span>{"sellerNick" in p ? p.sellerNick : (p as GmarketProduct).sellerName}</span>
                       {p.delivery && <span>· {p.delivery}</span>}
                       {p.reviewCount > 0 && <span>· 리뷰 {p.reviewCount}</span>}
                     </div>
@@ -525,7 +572,7 @@ export function EleventhStreetSearch() {
           </>
         )}
 
-        {is11st && !loading && products.length === 0 && totalCount === 0 && keyword && (
+        {isKeywordSite && !loading && products.length === 0 && totalCount === 0 && keyword && (
           <p className="text-center text-sm text-muted-foreground py-8">
             검색 결과가 없습니다
           </p>

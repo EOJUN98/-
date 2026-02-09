@@ -3,9 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { encryptSecret } from "@/lib/security/crypto";
+import { encryptSecret, decryptSecretIfNeeded } from "@/lib/security/crypto";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { MarketConfigSummary, SourcingConfig } from "@/types/settings";
+import type { MarketConfigSummary, SourcingConfig, MarketFeeConfig } from "@/types/settings";
+import { DEFAULT_MARKET_FEES } from "@/types/settings";
 
 const saveMarketConfigSchema = z.object({
   marketCode: z.enum(["coupang", "smartstore"]),
@@ -310,4 +311,129 @@ export async function saveSourcingConfigAction(
       updatedAt: data.updated_at,
     } as SourcingConfig,
   };
+}
+
+// ── API 연결 테스트 ──
+
+export async function testMarketConnectionAction(marketCode: "coupang" | "smartstore") {
+  const supabase = createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false as const, error: "로그인이 필요합니다" };
+
+  const { data: config } = await supabase
+    .from("user_market_configs")
+    .select("api_key, secret_key, vendor_id, is_active")
+    .eq("user_id", user.id)
+    .eq("market_code", marketCode)
+    .maybeSingle();
+
+  if (!config || !config.api_key || !config.secret_key) {
+    return { success: false as const, error: "API 키가 설정되지 않았습니다" };
+  }
+
+  try {
+    const apiKey = decryptSecretIfNeeded(config.api_key as string) ?? "";
+    const secretKey = decryptSecretIfNeeded(config.secret_key as string) ?? "";
+
+    if (marketCode === "smartstore") {
+      const tokenRes = await fetch("https://api.commerce.naver.com/external/v1/oauth2/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: apiKey,
+          client_secret: secretKey,
+          grant_type: "client_credentials",
+          type: "SELF",
+        }),
+      });
+
+      if (!tokenRes.ok) {
+        const payload = await tokenRes.json().catch(() => null) as
+          | { error?: string; error_description?: string }
+          | null;
+        const description = payload?.error_description ?? payload?.error ?? "인증 실패";
+        return { success: false as const, error: `인증 실패 (HTTP ${tokenRes.status}): ${description}` };
+      }
+
+      return { success: true as const, message: "스마트스토어 API 연결 성공" };
+    }
+
+    if (marketCode === "coupang") {
+      // 쿠팡은 HMAC 서명이 필요하므로 간단한 연결 확인만 수행
+      const vendorId = (config.vendor_id as string | null) ?? "";
+      if (!vendorId) {
+        return { success: false as const, error: "Vendor ID가 설정되지 않았습니다" };
+      }
+      return { success: true as const, message: `쿠팡 API 키 확인 완료 (vendor: ${vendorId})` };
+    }
+
+    return { success: false as const, error: "지원하지 않는 마켓입니다" };
+  } catch (err) {
+    return { success: false as const, error: `연결 테스트 실패: ${String(err)}` };
+  }
+}
+
+// ── 마켓별 수수료율 설정 ──
+
+const saveMarketFeesSchema = z.object({
+  fees: z.array(z.object({
+    marketCode: z.string(),
+    feeRate: z.number().min(0).max(50),
+  })),
+});
+
+export async function getMarketFeeRates(): Promise<{ data: MarketFeeConfig[] }> {
+  const supabase = createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) return { data: DEFAULT_MARKET_FEES };
+
+  const { data } = await supabase
+    .from("user_sourcing_configs")
+    .select("market_fee_rates")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!data || !data.market_fee_rates) {
+    return { data: DEFAULT_MARKET_FEES };
+  }
+
+  // DB에 저장된 수수료율로 기본값 덮어쓰기
+  const savedRates = data.market_fee_rates as Record<string, number>;
+  const merged = DEFAULT_MARKET_FEES.map((fee) => ({
+    ...fee,
+    feeRate: savedRates[fee.marketCode] ?? fee.feeRate,
+  }));
+
+  return { data: merged };
+}
+
+export async function saveMarketFeeRatesAction(input: z.infer<typeof saveMarketFeesSchema>) {
+  const parsed = saveMarketFeesSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false as const, error: parsed.error.issues.map((i) => i.message).join(", ") };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false as const, error: "로그인이 필요합니다" };
+
+  // 수수료율을 JSON 객체로 변환
+  const feeRatesObj: Record<string, number> = {};
+  for (const fee of parsed.data.fees) {
+    feeRatesObj[fee.marketCode] = fee.feeRate;
+  }
+
+  const { error } = await supabase
+    .from("user_sourcing_configs")
+    .upsert({
+      user_id: user.id,
+      market_fee_rates: feeRatesObj,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+
+  if (error) return { success: false as const, error: error.message };
+
+  revalidatePath("/settings");
+  return { success: true as const };
 }

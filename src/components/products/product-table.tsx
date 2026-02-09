@@ -2,9 +2,10 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 
 import { publishProductAction } from "@/actions/publish-product";
+import { quickUpdateProductAction, deleteProductAction } from "@/actions/products";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,16 +33,79 @@ const PUBLISH_BADGE: Record<string, { label: string; variant: "default" | "secon
 };
 
 function formatDate(value: string | null) {
-  if (!value) {
-    return "-";
-  }
-
+  if (!value) return "-";
   return new Date(value).toLocaleString("ko-KR", {
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit"
   });
+}
+
+// ── Inline Edit Cell ──
+
+function InlineEditCell({
+  value,
+  type,
+  onSave,
+}: {
+  value: string;
+  type: "text" | "number";
+  onSave: (newValue: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editing]);
+
+  async function handleSave() {
+    if (editValue.trim() === value.trim()) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    await onSave(editValue);
+    setSaving(false);
+    setEditing(false);
+  }
+
+  if (!editing) {
+    return (
+      <span
+        className="cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5 -mx-1"
+        onDoubleClick={() => {
+          setEditValue(value);
+          setEditing(true);
+        }}
+        title="더블클릭으로 수정"
+      >
+        {type === "number" ? Number(value).toLocaleString() + "원" : value}
+      </span>
+    );
+  }
+
+  return (
+    <Input
+      ref={inputRef}
+      type={type}
+      value={editValue}
+      onChange={(e) => setEditValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") handleSave();
+        if (e.key === "Escape") { setEditValue(value); setEditing(false); }
+      }}
+      onBlur={handleSave}
+      disabled={saving}
+      className="h-7 text-sm w-full"
+    />
+  );
 }
 
 export function ProductTable({ initialData }: ProductTableProps) {
@@ -54,48 +118,63 @@ export function ProductTable({ initialData }: ProductTableProps) {
 
   const filteredProducts = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) {
-      return products;
-    }
-
-    return products.filter((product) => {
-      return (
-        product.name.toLowerCase().includes(keyword) ||
-        (product.productCode ?? "").toLowerCase().includes(keyword)
-      );
-    });
+    if (!keyword) return products;
+    return products.filter((p) =>
+      p.name.toLowerCase().includes(keyword) ||
+      (p.productCode ?? "").toLowerCase().includes(keyword)
+    );
   }, [products, search]);
 
   const allVisibleSelected =
-    filteredProducts.length > 0 && filteredProducts.every((product) => selectedIds.has(product.id));
+    filteredProducts.length > 0 && filteredProducts.every((p) => selectedIds.has(p.id));
 
   function toggleSelectAll(checked: boolean) {
-    if (!checked) {
-      setSelectedIds(new Set());
-      return;
-    }
-
-    const next = new Set<string>();
-    for (const product of filteredProducts) {
-      next.add(product.id);
-    }
-    setSelectedIds(next);
+    if (!checked) { setSelectedIds(new Set()); return; }
+    setSelectedIds(new Set(filteredProducts.map((p) => p.id)));
   }
 
   function toggleSelect(id: string, checked: boolean) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (checked) {
-        next.add(id);
-      } else {
-        next.delete(id);
-      }
+      if (checked) next.add(id); else next.delete(id);
       return next;
     });
   }
 
   function upsertProduct(nextProduct: ProductListItem) {
-    setProducts((prev) => prev.map((product) => (product.id === nextProduct.id ? { ...product, ...nextProduct } : product)));
+    setProducts((prev) => prev.map((p) => (p.id === nextProduct.id ? { ...p, ...nextProduct } : p)));
+  }
+
+  async function handleInlineUpdate(productId: string, field: "name" | "salePrice", value: string) {
+    const result = await quickUpdateProductAction({
+      id: productId,
+      field,
+      value: field === "salePrice" ? Number(value) : value,
+    });
+
+    if (!result.success) {
+      toast({ title: "수정 실패", description: result.error, variant: "destructive" });
+      return;
+    }
+
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.id === productId
+          ? { ...p, name: result.updatedName, salePrice: result.updatedSalePrice }
+          : p
+      )
+    );
+    toast({ title: "수정 완료" });
+  }
+
+  async function handleDelete(productId: string, productName: string) {
+    const result = await deleteProductAction(productId);
+    if (!result.success) {
+      toast({ title: "삭제 실패", description: result.error, variant: "destructive" });
+      return;
+    }
+    setProducts((prev) => prev.filter((p) => p.id !== productId));
+    toast({ title: "삭제 완료", description: `${productName} 삭제됨` });
   }
 
   async function publishSingle(productId: string, marketCode: PublishMarketCode) {
@@ -104,83 +183,53 @@ export function ProductTable({ initialData }: ProductTableProps) {
     setPublishingKey(null);
 
     if (!result.success) {
-      toast({
-        title: `${marketCode} 전송 실패`,
-        description: result.error,
-        variant: "destructive"
-      });
-
+      toast({ title: `${marketCode} 전송 실패`, description: result.error, variant: "destructive" });
       setProducts((prev) =>
-        prev.map((product) =>
-          product.id === productId
-            ? {
-                ...product,
-                lastPublishStatus: "failed",
-                lastPublishError: result.error,
-                lastPublishedAt: new Date().toISOString()
-              }
-            : product
+        prev.map((p) =>
+          p.id === productId
+            ? { ...p, lastPublishStatus: "failed", lastPublishError: result.error, lastPublishedAt: new Date().toISOString() }
+            : p
         )
       );
       return;
     }
 
-    toast({
-      title: `${marketCode} 전송 완료`,
-      description: `마켓 상품 ID: ${result.marketProductId}`
-    });
-
+    toast({ title: `${marketCode} 전송 완료`, description: `마켓 상품 ID: ${result.marketProductId}` });
     setProducts((prev) =>
-      prev.map((product) =>
-        product.id === productId
-          ? {
-              ...product,
-              lastPublishStatus: "success",
-              lastPublishError: null,
-              lastPublishedAt: new Date().toISOString()
-            }
-          : product
+      prev.map((p) =>
+        p.id === productId
+          ? { ...p, lastPublishStatus: "success", lastPublishError: null, lastPublishedAt: new Date().toISOString() }
+          : p
       )
     );
   }
 
   async function publishSelected(marketCode: PublishMarketCode) {
     const ids = Array.from(selectedIds);
-    if (ids.length === 0) {
-      return;
-    }
+    if (ids.length === 0) return;
 
     let success = 0;
     let failed = 0;
 
     for (const id of ids) {
-      // Keep requests sequential to avoid rate-limit bursts on marketplace APIs.
-      // eslint-disable-next-line no-await-in-loop
       const result = await publishProductAction({ productId: id, marketCode, optimizeTitle: true });
-      if (result.success) {
-        success += 1;
-      } else {
-        failed += 1;
-      }
+      if (result.success) success += 1; else failed += 1;
 
       setProducts((prev) =>
-        prev.map((product) =>
-          product.id === id
+        prev.map((p) =>
+          p.id === id
             ? {
-                ...product,
+                ...p,
                 lastPublishStatus: result.success ? "success" : "failed",
                 lastPublishError: result.success ? null : result.error,
                 lastPublishedAt: new Date().toISOString()
               }
-            : product
+            : p
         )
       );
     }
 
-    toast({
-      title: `${marketCode} 일괄 전송 완료`,
-      description: `성공 ${success}건, 실패 ${failed}건`
-    });
+    toast({ title: `${marketCode} 일괄 전송 완료`, description: `성공 ${success}건, 실패 ${failed}건` });
   }
 
   return (
@@ -190,28 +239,22 @@ export function ProductTable({ initialData }: ProductTableProps) {
           <Input
             placeholder="상품명 또는 상품코드 검색"
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(e) => setSearch(e.target.value)}
             className="sm:w-[320px]"
           />
           <span className="text-sm text-muted-foreground">총 {filteredProducts.length}개</span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={() => publishSelected("coupang")}
-            disabled={selectedIds.size === 0}
-          >
+          <Button variant="outline" onClick={() => publishSelected("coupang")} disabled={selectedIds.size === 0}>
             선택 쿠팡 전송
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => publishSelected("smartstore")}
-            disabled={selectedIds.size === 0}
-          >
+          <Button variant="outline" onClick={() => publishSelected("smartstore")} disabled={selectedIds.size === 0}>
             선택 스마트스토어 전송
           </Button>
         </div>
       </div>
+
+      <p className="text-xs text-muted-foreground">상품명 또는 판매가를 더블클릭하면 인라인 수정이 가능합니다</p>
 
       <div className="rounded-lg border bg-card">
         <Table>
@@ -221,7 +264,7 @@ export function ProductTable({ initialData }: ProductTableProps) {
                 <input
                   type="checkbox"
                   checked={allVisibleSelected}
-                  onChange={(event) => toggleSelectAll(event.target.checked)}
+                  onChange={(e) => toggleSelectAll(e.target.checked)}
                   aria-label="전체 선택"
                 />
               </TableHead>
@@ -252,7 +295,7 @@ export function ProductTable({ initialData }: ProductTableProps) {
                       <input
                         type="checkbox"
                         checked={selectedIds.has(product.id)}
-                        onChange={(event) => toggleSelect(product.id, event.target.checked)}
+                        onChange={(e) => toggleSelect(product.id, e.target.checked)}
                         aria-label={`${product.name} 선택`}
                       />
                     </TableCell>
@@ -264,11 +307,21 @@ export function ProductTable({ initialData }: ProductTableProps) {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <p className="line-clamp-2 font-medium">{product.name}</p>
-                      <p className="text-xs text-muted-foreground">{product.productCode ?? "코드 없음"}</p>
+                      <div className="space-y-0.5">
+                        <InlineEditCell
+                          value={product.name}
+                          type="text"
+                          onSave={(v) => handleInlineUpdate(product.id, "name", v)}
+                        />
+                        <p className="text-xs text-muted-foreground">{product.productCode ?? "코드 없음"}</p>
+                      </div>
                     </TableCell>
                     <TableCell className="font-semibold">
-                      {product.salePrice.toLocaleString()}원
+                      <InlineEditCell
+                        value={String(product.salePrice)}
+                        type="number"
+                        onSave={(v) => handleInlineUpdate(product.id, "salePrice", v)}
+                      />
                     </TableCell>
                     <TableCell>
                       {publishBadge ? (
@@ -281,7 +334,7 @@ export function ProductTable({ initialData }: ProductTableProps) {
                       {formatDate(product.lastPublishedAt)}
                     </TableCell>
                     <TableCell>
-                      <div className="flex justify-end gap-2">
+                      <div className="flex justify-end gap-1">
                         <Button asChild variant="ghost" size="sm">
                           <Link href={`/products/${product.id}`}>상세</Link>
                         </Button>
@@ -301,7 +354,15 @@ export function ProductTable({ initialData }: ProductTableProps) {
                           disabled={publishingKey === `${product.id}:smartstore`}
                           onClick={() => publishSingle(product.id, "smartstore")}
                         >
-                          스마트스토어
+                          SS
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => handleDelete(product.id, product.name)}
+                        >
+                          삭제
                         </Button>
                       </div>
                     </TableCell>
@@ -315,11 +376,7 @@ export function ProductTable({ initialData }: ProductTableProps) {
 
       <ProductSheet
         open={Boolean(editing)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setEditing(null);
-          }
-        }}
+        onOpenChange={(open) => { if (!open) setEditing(null); }}
         product={editing}
         onUpdated={(nextProduct) => {
           upsertProduct(nextProduct);

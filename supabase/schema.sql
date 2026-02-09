@@ -57,7 +57,9 @@ CREATE TABLE IF NOT EXISTS public.collection_jobs (
 CREATE TABLE IF NOT EXISTS public.raw_products (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     job_id UUID REFERENCES public.collection_jobs(id) ON DELETE SET NULL,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
     external_id VARCHAR(255),
+    site_id VARCHAR(50) DEFAULT 'aliexpress',
     url TEXT,
     title_origin TEXT,
     price_origin DECIMAL(10, 2),
@@ -65,6 +67,8 @@ CREATE TABLE IF NOT EXISTS public.raw_products (
     images_json JSONB,
     options_json JSONB,
     detail_html TEXT,
+    status VARCHAR(50) DEFAULT 'collected',
+    raw_data JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now())
 );
 
@@ -224,6 +228,7 @@ CREATE TABLE IF NOT EXISTS public.user_sourcing_configs (
     page_size INT DEFAULT 50,
     auto_convert BOOLEAN DEFAULT true,
     default_margin_rate DECIMAL(5,2) DEFAULT 30.0,
+    market_fee_rates JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now())
 );
@@ -281,12 +286,17 @@ CREATE TABLE IF NOT EXISTS public.tracking_push_logs (
 DO $$ BEGIN
   ALTER TABLE public.collection_jobs ADD COLUMN IF NOT EXISTS retry_count INT DEFAULT 0;
   ALTER TABLE public.collection_jobs ADD COLUMN IF NOT EXISTS max_retries INT DEFAULT 3;
+  ALTER TABLE public.raw_products ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+  ALTER TABLE public.raw_products ADD COLUMN IF NOT EXISTS site_id VARCHAR(50) DEFAULT 'aliexpress';
+  ALTER TABLE public.raw_products ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'collected';
+  ALTER TABLE public.raw_products ADD COLUMN IF NOT EXISTS raw_data JSONB DEFAULT '{}'::jsonb;
   ALTER TABLE public.products ADD COLUMN IF NOT EXISTS exchange_rate DECIMAL(10, 2);
   ALTER TABLE public.products ADD COLUMN IF NOT EXISTS stock_quantity INT DEFAULT 999;
   ALTER TABLE public.products ADD COLUMN IF NOT EXISTS keywords TEXT[];
   ALTER TABLE public.products ADD COLUMN IF NOT EXISTS category_id INT;
   ALTER TABLE public.products ADD COLUMN IF NOT EXISTS is_translated BOOLEAN DEFAULT false;
   ALTER TABLE public.products ADD COLUMN IF NOT EXISTS shipping_fee INT DEFAULT 0;
+  ALTER TABLE public.user_sourcing_configs ADD COLUMN IF NOT EXISTS market_fee_rates JSONB DEFAULT '{}'::jsonb;
 END $$;
 
 -- ==========================================
@@ -294,6 +304,8 @@ END $$;
 -- ==========================================
 CREATE INDEX IF NOT EXISTS idx_products_user ON public.products(user_id);
 CREATE INDEX IF NOT EXISTS idx_products_code ON public.products(product_code);
+CREATE UNIQUE INDEX IF NOT EXISTS raw_products_user_site_external
+    ON public.raw_products(user_id, site_id, external_id);
 CREATE INDEX IF NOT EXISTS idx_product_policies_user ON public.product_policies(user_id);
 CREATE INDEX IF NOT EXISTS idx_policy_margin_tiers_policy ON public.policy_margin_tiers(policy_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_detail_templates_user ON public.detail_templates(user_id);
@@ -339,11 +351,9 @@ CREATE POLICY "Users manage own jobs" ON public.collection_jobs
     FOR ALL USING (auth.uid() = user_id);
 
 DROP POLICY IF EXISTS "Users manage raw products via job" ON public.raw_products;
-CREATE POLICY "Users manage raw products via job" ON public.raw_products
-    FOR ALL USING (EXISTS (
-        SELECT 1 FROM public.collection_jobs job
-        WHERE job.id = raw_products.job_id AND job.user_id = auth.uid()
-    ));
+DROP POLICY IF EXISTS "Users manage own raw_products" ON public.raw_products;
+CREATE POLICY "Users manage own raw_products" ON public.raw_products
+    FOR ALL USING (auth.uid() = user_id);
 
 DROP POLICY IF EXISTS "Users manage own products" ON public.products;
 CREATE POLICY "Users manage own products" ON public.products

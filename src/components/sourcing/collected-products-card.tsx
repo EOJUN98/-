@@ -87,7 +87,8 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
 
   function toJobIdParam(value: JobFilterValue): string | null | undefined {
     if (value === "all") return undefined;
-    if (value === "unassigned") return null;
+    // UX decision: "미지정"은 '전체 표시' 의미로 사용(미지정만 필터링하지 않음).
+    if (value === "unassigned") return undefined;
     return value;
   }
 
@@ -221,7 +222,7 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">전체 그룹</SelectItem>
-                <SelectItem value="unassigned">그룹 미지정</SelectItem>
+                <SelectItem value="unassigned">그룹 미지정(전체 표시)</SelectItem>
                 {jobs.map((job) => (
                   <SelectItem key={job.id} value={job.id}>
                     {formatJobLabel(job)}

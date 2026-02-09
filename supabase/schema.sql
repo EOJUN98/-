@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS public.collection_jobs (
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
     site_id VARCHAR(50) NOT NULL,
     search_url TEXT NOT NULL,
+    display_name TEXT,
     status VARCHAR(20) DEFAULT 'pending',
     options JSONB DEFAULT '{}'::jsonb,
     total_target INT DEFAULT 0,
@@ -286,6 +287,7 @@ CREATE TABLE IF NOT EXISTS public.tracking_push_logs (
 DO $$ BEGIN
   ALTER TABLE public.collection_jobs ADD COLUMN IF NOT EXISTS retry_count INT DEFAULT 0;
   ALTER TABLE public.collection_jobs ADD COLUMN IF NOT EXISTS max_retries INT DEFAULT 3;
+  ALTER TABLE public.collection_jobs ADD COLUMN IF NOT EXISTS display_name TEXT;
   ALTER TABLE public.raw_products ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
   ALTER TABLE public.raw_products ADD COLUMN IF NOT EXISTS site_id VARCHAR(50) DEFAULT 'aliexpress';
   ALTER TABLE public.raw_products ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'collected';

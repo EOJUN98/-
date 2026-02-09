@@ -80,6 +80,7 @@ interface CrawlStatus {
 
 export function EleventhStreetSearch() {
   const [siteId, setSiteId] = useState<SiteId>("11st");
+  const [displayName, setDisplayName] = useState("");
   const [keyword, setKeyword] = useState("");
   const [searchUrl, setSearchUrl] = useState("");
   const [totalTarget, setTotalTarget] = useState(100);
@@ -185,6 +186,7 @@ export function EleventhStreetSearch() {
     setLoading(true);
     const result = await createCollectionJob({
       siteId: siteId as "aliexpress" | "taobao",
+      displayName: displayName.trim() ? displayName.trim() : undefined,
       searchUrl,
       totalTarget,
     });
@@ -196,6 +198,7 @@ export function EleventhStreetSearch() {
     }
 
     setSearchUrl("");
+    setDisplayName("");
     toast({
       title: "수집 작업 생성 완료",
       description: "Extension이 곧 수집을 시작합니다.",
@@ -464,6 +467,16 @@ export function EleventhStreetSearch() {
                   onChange={(e) => setTotalTarget(Number(e.target.value))}
                 />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="displayName">검색필터명 (선택)</Label>
+              <Input
+                id="displayName"
+                placeholder="예: 알리 여름 원피스"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                maxLength={80}
+              />
             </div>
             <Button type="submit" disabled={loading} className="gap-2">
               {loading && <Loader2 className="h-4 w-4 animate-spin" />}

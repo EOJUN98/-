@@ -54,6 +54,7 @@ type CollectionJobLike = {
   id: string;
   site_id: string;
   search_url: string;
+  display_name?: string | null;
   status: string;
   created_at: string;
 };
@@ -61,6 +62,7 @@ type CollectionJobLike = {
 type JobFilterValue = "all" | "unassigned" | string;
 
 function formatJobLabel(job: CollectionJobLike) {
+  const displayName = (job.display_name ?? "").trim();
   const shortUrl = job.search_url.length > 60 ? job.search_url.slice(0, 57) + "..." : job.search_url;
   const date = new Date(job.created_at).toLocaleString("ko-KR", {
     month: "2-digit",
@@ -68,6 +70,7 @@ function formatJobLabel(job: CollectionJobLike) {
     hour: "2-digit",
     minute: "2-digit",
   });
+  if (displayName) return `${displayName} · ${job.site_id.toUpperCase()} · ${date}`;
   return `${job.site_id.toUpperCase()} · ${date} · ${shortUrl}`;
 }
 

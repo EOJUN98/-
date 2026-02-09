@@ -8,6 +8,11 @@ const createJobSchema = z.object({
   siteId: z.enum(["aliexpress", "taobao"], {
     required_error: "수집 사이트를 선택해주세요",
   }),
+  displayName: z
+    .string()
+    .trim()
+    .max(80, "필터명은 80자 이내로 입력해주세요")
+    .optional(),
   searchUrl: z
     .string()
     .url("올바른 URL 형식이 아닙니다"),
@@ -72,24 +77,57 @@ export async function createCollectionJob(
     return { success: false, error: "로그인이 필요합니다" };
   }
 
-  const { data, error } = await supabase
-    .from("collection_jobs")
-    .insert({
-      user_id: user.id,
-      site_id: parsed.data.siteId,
-      search_url: parsed.data.searchUrl,
-      status: "pending",
-      total_target: parsed.data.totalTarget,
-      options: parsed.data.options ?? {},
-    })
-    .select("id")
-    .single();
+  const fallbackDisplayName = `${parsed.data.siteId.toUpperCase()} · ${parsed.data.searchUrl}`.slice(0, 80);
+  const displayName = parsed.data.displayName?.trim() || (parsed.data.options?.displayName as string | undefined)?.trim() || fallbackDisplayName;
 
-  if (error) {
-    return { success: false, error: `작업 생성 실패: ${error.message}` };
+  let insertError: { message: string } | null = null;
+  let jobId: string | null = null;
+
+  // Prefer inserting with display_name (newer schema). If the column isn't migrated yet,
+  // retry without it to avoid breaking the workflow.
+  {
+    const { data, error } = await supabase
+      .from("collection_jobs")
+      .insert({
+        user_id: user.id,
+        site_id: parsed.data.siteId,
+        search_url: parsed.data.searchUrl,
+        display_name: displayName,
+        status: "pending",
+        total_target: parsed.data.totalTarget,
+        options: { ...(parsed.data.options ?? {}), displayName },
+      })
+      .select("id")
+      .single();
+
+    if (!error && data?.id) {
+      jobId = data.id as string;
+    } else if (error?.message?.toLowerCase().includes("display_name") && error.message.toLowerCase().includes("does not exist")) {
+      const { data: data2, error: error2 } = await supabase
+        .from("collection_jobs")
+        .insert({
+          user_id: user.id,
+          site_id: parsed.data.siteId,
+          search_url: parsed.data.searchUrl,
+          status: "pending",
+          total_target: parsed.data.totalTarget,
+          options: { ...(parsed.data.options ?? {}), displayName },
+        })
+        .select("id")
+        .single();
+
+      if (!error2 && data2?.id) jobId = data2.id as string;
+      else insertError = error2 ?? error;
+    } else {
+      insertError = error ?? { message: "작업 생성 실패" };
+    }
   }
 
-  return { success: true, jobId: data.id };
+  if (!jobId) {
+    return { success: false, error: `작업 생성 실패: ${insertError?.message ?? "알 수 없는 오류"}` };
+  }
+
+  return { success: true, jobId };
 }
 
 // ── Fetch Collection Jobs ──

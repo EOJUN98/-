@@ -28,6 +28,7 @@ interface CollectionJobFormProps {
 
 export function CollectionJobForm({ onJobCreated }: CollectionJobFormProps) {
   const [siteId, setSiteId] = useState<"aliexpress" | "taobao">("aliexpress");
+  const [displayName, setDisplayName] = useState("");
   const [searchUrl, setSearchUrl] = useState("");
   const [totalTarget, setTotalTarget] = useState(100);
   const [loading, setLoading] = useState(false);
@@ -41,6 +42,7 @@ export function CollectionJobForm({ onJobCreated }: CollectionJobFormProps) {
 
     const result = await createCollectionJob({
       siteId,
+      displayName: displayName.trim() ? displayName.trim() : undefined,
       searchUrl,
       totalTarget,
     });
@@ -53,6 +55,7 @@ export function CollectionJobForm({ onJobCreated }: CollectionJobFormProps) {
     }
 
     setSearchUrl("");
+    setDisplayName("");
     toast({
       title: "수집 작업 생성 완료",
       description: "Extension이 곧 수집을 시작합니다.",
@@ -104,6 +107,17 @@ export function CollectionJobForm({ onJobCreated }: CollectionJobFormProps) {
                 required
               />
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="displayName">검색필터명 (선택)</Label>
+            <Input
+              id="displayName"
+              placeholder="예: 알리 여름 원피스"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              maxLength={80}
+            />
           </div>
 
           <div className="flex items-end gap-4">

@@ -379,22 +379,13 @@ export async function setDefaultPolicy(
   const user = await getUser(supabase);
   if (!user) return { success: false, error: "로그인이 필요합니다" };
 
-  // Unset all defaults
-  const { error: unsetError } = await supabase
-    .from("product_policies")
-    .update({ is_default: false })
-    .eq("user_id", user.id);
-
-  if (unsetError) return { success: false, error: unsetError.message };
-
-  // Set new default
-  const { error } = await supabase
-    .from("product_policies")
-    .update({ is_default: true })
-    .eq("id", policyId)
-    .eq("user_id", user.id);
+  // One statement in DB to avoid a "no default" gap under concurrent requests.
+  const { data, error } = await supabase.rpc("set_default_product_policy", {
+    p_policy_id: policyId,
+  });
 
   if (error) return { success: false, error: error.message };
+  if (!data) return { success: false, error: "정책을 찾을 수 없습니다" };
 
   revalidatePath("/policies");
   return { success: true };

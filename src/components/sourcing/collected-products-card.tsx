@@ -55,6 +55,7 @@ type CollectionJobLike = {
   site_id: string;
   search_url: string;
   display_name?: string | null;
+  options?: Record<string, unknown> | null;
   status: string;
   created_at: string;
 };
@@ -62,7 +63,8 @@ type CollectionJobLike = {
 type JobFilterValue = "all" | "unassigned" | string;
 
 function formatJobLabel(job: CollectionJobLike) {
-  const displayName = (job.display_name ?? "").trim();
+  const displayName = (job.display_name ?? "").trim()
+    || (typeof job.options?.displayName === "string" ? job.options.displayName.trim() : "");
   const shortUrl = job.search_url.length > 60 ? job.search_url.slice(0, 57) + "..." : job.search_url;
   const date = new Date(job.created_at).toLocaleString("ko-KR", {
     month: "2-digit",

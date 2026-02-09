@@ -9,6 +9,7 @@ interface CollectionJobRow {
   site_id: string;
   search_url: string;
   display_name: string | null;
+  options: Record<string, unknown> | null;
   status: string;
   total_target: number;
   total_collected: number;

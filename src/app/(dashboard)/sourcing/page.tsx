@@ -3,6 +3,7 @@
 import { useCollectionProgress } from "@/hooks/use-collection-progress";
 import { ProgressCard } from "@/components/sourcing/progress-card";
 import { EleventhStreetSearch } from "@/components/sourcing/eleventh-street-search";
+import { CollectedProductsCard } from "@/components/sourcing/collected-products-card";
 
 export default function SourcingPage() {
   const { jobs, loading } = useCollectionProgress();
@@ -17,6 +18,7 @@ export default function SourcingPage() {
       </div>
 
       <EleventhStreetSearch />
+      <CollectedProductsCard />
       <ProgressCard jobs={jobs} loading={loading} />
     </section>
   );

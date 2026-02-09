@@ -61,6 +61,7 @@ type CollectionJobLike = {
 };
 
 type JobFilterValue = "all" | "unassigned" | string;
+type StatusFilterValue = "all" | "collected" | "detail_crawled" | "converted";
 
 function formatJobLabel(job: CollectionJobLike) {
   const displayName = (job.display_name ?? "").trim()
@@ -85,6 +86,7 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
   const [converting, setConverting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [jobFilter, setJobFilter] = useState<JobFilterValue>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("all");
   const { toast } = useToast();
 
   const pageSize = 30;
@@ -97,10 +99,24 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
     return value;
   }
 
-  const loadProducts = useCallback(async (targetPage: number, filterValue: JobFilterValue) => {
+  function toStatusParam(value: StatusFilterValue): string | undefined {
+    if (value === "all") return undefined;
+    return value;
+  }
+
+  const loadProducts = useCallback(async (
+    targetPage: number,
+    jobValue: JobFilterValue,
+    statusValue: StatusFilterValue
+  ) => {
     setLoading(true);
     setSelected(new Set());
-    const result = await fetchCollectedProducts(targetPage, pageSize, toJobIdParam(filterValue));
+    const result = await fetchCollectedProducts(
+      targetPage,
+      pageSize,
+      toJobIdParam(jobValue),
+      toStatusParam(statusValue)
+    );
     setLoading(false);
 
     if (!result.success) {
@@ -114,8 +130,8 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
   }, [pageSize, toast]);
 
   useEffect(() => {
-    loadProducts(1, jobFilter);
-  }, [jobFilter, loadProducts]);
+    loadProducts(1, jobFilter, statusFilter);
+  }, [jobFilter, statusFilter, loadProducts]);
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
@@ -144,7 +160,7 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
     }
 
     toast({ title: `${selected.size}개 상품 삭제됨` });
-    loadProducts(page, jobFilter);
+    loadProducts(page, jobFilter, statusFilter);
   }
 
   async function handleConvert() {
@@ -163,7 +179,7 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
       title: "상품관리로 변환 완료",
       description: `${result.convertedCount}개 상품이 상품관리에 등록되었습니다.`,
     });
-    loadProducts(page, jobFilter);
+    loadProducts(page, jobFilter, statusFilter);
   }
 
   async function handleConvertAll() {
@@ -173,7 +189,12 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
     const allIds: string[] = [];
     let fetchPage = 1;
     while (true) {
-      const result = await fetchCollectedProducts(fetchPage, 100, toJobIdParam(jobFilter));
+      const result = await fetchCollectedProducts(
+        fetchPage,
+        100,
+        toJobIdParam(jobFilter),
+        toStatusParam(statusFilter)
+      );
       if (!result.success || !result.products || result.products.length === 0) break;
       allIds.push(...result.products.map((p) => p.id));
       if (allIds.length >= (result.totalCount ?? 0)) break;
@@ -198,7 +219,7 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
       title: "전체 변환 완료",
       description: `${result.convertedCount}개 상품이 상품관리에 등록되었습니다.`,
     });
-    loadProducts(page, jobFilter);
+    loadProducts(page, jobFilter, statusFilter);
   }
 
   return (
@@ -235,10 +256,27 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
                 ))}
               </SelectContent>
             </Select>
+            <Select
+              value={statusFilter}
+              onValueChange={(value) => {
+                setStatusFilter(value as StatusFilterValue);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-[160px]">
+                <SelectValue placeholder="상태" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">전체 상태</SelectItem>
+                <SelectItem value="collected">수집완료</SelectItem>
+                <SelectItem value="detail_crawled">상세완료</SelectItem>
+                <SelectItem value="converted">변환완료</SelectItem>
+              </SelectContent>
+            </Select>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => loadProducts(page, jobFilter)}
+              onClick={() => loadProducts(page, jobFilter, statusFilter)}
               disabled={loading}
             >
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -358,7 +396,7 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
                   variant="outline"
                   size="sm"
                   disabled={page <= 1 || loading}
-                  onClick={() => loadProducts(page - 1, jobFilter)}
+                  onClick={() => loadProducts(page - 1, jobFilter, statusFilter)}
                 >
                   <ChevronLeft className="h-4 w-4" />
                   이전
@@ -370,7 +408,7 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
                   variant="outline"
                   size="sm"
                   disabled={page >= totalPages || loading}
-                  onClick={() => loadProducts(page + 1, jobFilter)}
+                  onClick={() => loadProducts(page + 1, jobFilter, statusFilter)}
                 >
                   다음
                   <ChevronRight className="h-4 w-4" />

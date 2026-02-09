@@ -626,7 +626,8 @@ interface FetchRawProductsResult {
 export async function fetchCollectedProducts(
   page = 1,
   pageSize = 30,
-  jobId?: string | null
+  jobId?: string | null,
+  status?: string
 ): Promise<FetchRawProductsResult> {
   const supabase = createSupabaseServerClient();
   const {
@@ -658,6 +659,11 @@ export async function fetchCollectedProducts(
   } else if (typeof jobId === "string" && jobId.length > 0) {
     countQuery = countQuery.eq("job_id", jobId);
     dataQuery = dataQuery.eq("job_id", jobId);
+  }
+
+  if (typeof status === "string" && status.length > 0) {
+    countQuery = countQuery.eq("status", status);
+    dataQuery = dataQuery.eq("status", status);
   }
 
   const { count } = await countQuery;

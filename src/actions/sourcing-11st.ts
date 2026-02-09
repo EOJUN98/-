@@ -623,6 +623,70 @@ interface FetchRawProductsResult {
   totalCount?: number;
 }
 
+interface RawProductStatusSummary {
+  total: number;
+  collected: number;
+  detail_crawled: number;
+  converted: number;
+  other: number;
+}
+
+export async function fetchRawProductStatusSummary(
+  jobId?: string | null
+): Promise<{ success: boolean; error?: string; summary?: RawProductStatusSummary }> {
+  const supabase = createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { success: false, error: "로그인이 필요합니다" };
+  }
+
+  const userId = user.id;
+
+  function baseCountQuery() {
+    let q = supabase
+      .from("raw_products")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId);
+
+    if (jobId === null) q = q.is("job_id", null);
+    else if (typeof jobId === "string" && jobId.length > 0) q = q.eq("job_id", jobId);
+
+    return q;
+  }
+
+  const [
+    totalRes,
+    collectedRes,
+    detailRes,
+    convertedRes,
+  ] = await Promise.all([
+    baseCountQuery(),
+    baseCountQuery().eq("status", "collected"),
+    baseCountQuery().eq("status", "detail_crawled"),
+    baseCountQuery().eq("status", "converted"),
+  ]);
+
+  const total = totalRes.count ?? 0;
+  const collected = collectedRes.count ?? 0;
+  const detail_crawled = detailRes.count ?? 0;
+  const converted = convertedRes.count ?? 0;
+  const known = collected + detail_crawled + converted;
+
+  return {
+    success: true,
+    summary: {
+      total,
+      collected,
+      detail_crawled,
+      converted,
+      other: Math.max(0, total - known),
+    },
+  };
+}
+
 export async function fetchCollectedProducts(
   page = 1,
   pageSize = 30,

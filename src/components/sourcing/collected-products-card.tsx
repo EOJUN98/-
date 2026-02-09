@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   fetchCollectedProducts,
+  fetchRawProductStatusSummary,
   deleteRawProducts,
   convertRawToProducts,
   type RawProductRow,
@@ -82,6 +83,8 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [statusSummary, setStatusSummary] = useState<{ total: number; collected: number; detail_crawled: number; converted: number; other: number } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [converting, setConverting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -103,6 +106,17 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
     if (value === "all") return undefined;
     return value;
   }
+
+  const loadSummary = useCallback(async (jobValue: JobFilterValue) => {
+    setSummaryLoading(true);
+    const res = await fetchRawProductStatusSummary(toJobIdParam(jobValue));
+    setSummaryLoading(false);
+    if (!res.success) {
+      setStatusSummary(null);
+      return;
+    }
+    setStatusSummary(res.summary ?? null);
+  }, []);
 
   const loadProducts = useCallback(async (
     targetPage: number,
@@ -131,7 +145,8 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
 
   useEffect(() => {
     loadProducts(1, jobFilter, statusFilter);
-  }, [jobFilter, statusFilter, loadProducts]);
+    loadSummary(jobFilter);
+  }, [jobFilter, statusFilter, loadProducts, loadSummary]);
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
@@ -161,6 +176,7 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
 
     toast({ title: `${selected.size}개 상품 삭제됨` });
     loadProducts(page, jobFilter, statusFilter);
+    loadSummary(jobFilter);
   }
 
   async function handleConvert() {
@@ -180,6 +196,7 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
       description: `${result.convertedCount}개 상품이 상품관리에 등록되었습니다.`,
     });
     loadProducts(page, jobFilter, statusFilter);
+    loadSummary(jobFilter);
   }
 
   async function handleConvertAll() {
@@ -220,7 +237,15 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
       description: `${result.convertedCount}개 상품이 상품관리에 등록되었습니다.`,
     });
     loadProducts(page, jobFilter, statusFilter);
+    loadSummary(jobFilter);
   }
+
+  const summaryTotal = statusSummary?.total ?? 0;
+  const denom = Math.max(1, summaryTotal);
+  const collectedPct = Math.round(((statusSummary?.collected ?? 0) / denom) * 100);
+  const detailPct = Math.round(((statusSummary?.detail_crawled ?? 0) / denom) * 100);
+  const convertedPct = Math.round(((statusSummary?.converted ?? 0) / denom) * 100);
+  const otherPct = Math.max(0, 100 - collectedPct - detailPct - convertedPct);
 
   return (
     <Card>
@@ -285,6 +310,35 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
         </div>
       </CardHeader>
       <CardContent>
+        <div className="space-y-2 pb-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge variant="outline">그룹 합계: {summaryTotal.toLocaleString()}개</Badge>
+            <Badge variant="outline">수집완료 {statusSummary?.collected?.toLocaleString() ?? 0}</Badge>
+            <Badge variant="outline">상세완료 {statusSummary?.detail_crawled?.toLocaleString() ?? 0}</Badge>
+            <Badge variant="outline">변환완료 {statusSummary?.converted?.toLocaleString() ?? 0}</Badge>
+            {(statusSummary?.other ?? 0) > 0 && (
+              <Badge variant="outline">기타 {statusSummary?.other?.toLocaleString() ?? 0}</Badge>
+            )}
+            {summaryLoading && (
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                요약 불러오는 중
+              </span>
+            )}
+          </div>
+          <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+            <div className="flex h-full w-full">
+              <div className="h-full bg-slate-400" style={{ width: `${collectedPct}%` }} />
+              <div className="h-full bg-blue-500" style={{ width: `${detailPct}%` }} />
+              <div className="h-full bg-emerald-500" style={{ width: `${convertedPct}%` }} />
+              <div className="h-full bg-muted-foreground/40" style={{ width: `${otherPct}%` }} />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            그룹 내 상태 분포(수집완료/상세완료/변환완료/기타)
+          </p>
+        </div>
+
         {loading ? (
           <div className="flex items-center justify-center py-10">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />

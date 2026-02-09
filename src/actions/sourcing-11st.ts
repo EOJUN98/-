@@ -625,7 +625,8 @@ interface FetchRawProductsResult {
 
 export async function fetchCollectedProducts(
   page = 1,
-  pageSize = 30
+  pageSize = 30,
+  jobId?: string | null
 ): Promise<FetchRawProductsResult> {
   const supabase = createSupabaseServerClient();
   const {
@@ -639,17 +640,29 @@ export async function fetchCollectedProducts(
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
 
-  const { count } = await supabase
+  let countQuery = supabase
     .from("raw_products")
     .select("id", { count: "exact", head: true })
     .eq("user_id", user.id);
 
-  const { data, error } = await supabase
+  let dataQuery = supabase
     .from("raw_products")
     .select(
       "id, external_id, title_origin, price_origin, currency, images_json, url, site_id, status, raw_data, created_at"
     )
-    .eq("user_id", user.id)
+    .eq("user_id", user.id);
+
+  if (jobId === null) {
+    countQuery = countQuery.is("job_id", null);
+    dataQuery = dataQuery.is("job_id", null);
+  } else if (typeof jobId === "string" && jobId.length > 0) {
+    countQuery = countQuery.eq("job_id", jobId);
+    dataQuery = dataQuery.eq("job_id", jobId);
+  }
+
+  const { count } = await countQuery;
+
+  const { data, error } = await dataQuery
     .order("created_at", { ascending: false })
     .range(from, to);
 

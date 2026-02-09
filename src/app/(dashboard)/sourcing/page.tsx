@@ -18,7 +18,7 @@ export default function SourcingPage() {
       </div>
 
       <EleventhStreetSearch />
-      <CollectedProductsCard />
+      <CollectedProductsCard jobs={jobs} />
       <ProgressCard jobs={jobs} loading={loading} />
     </section>
   );

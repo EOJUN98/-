@@ -12,6 +12,13 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -43,7 +50,28 @@ function formatPrice(price: number, currency: string) {
   return `${currency} ${price.toLocaleString()}`;
 }
 
-export function CollectedProductsCard() {
+type CollectionJobLike = {
+  id: string;
+  site_id: string;
+  search_url: string;
+  status: string;
+  created_at: string;
+};
+
+type JobFilterValue = "all" | "unassigned" | string;
+
+function formatJobLabel(job: CollectionJobLike) {
+  const shortUrl = job.search_url.length > 60 ? job.search_url.slice(0, 57) + "..." : job.search_url;
+  const date = new Date(job.created_at).toLocaleString("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `${job.site_id.toUpperCase()} · ${date} · ${shortUrl}`;
+}
+
+export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[] }) {
   const [products, setProducts] = useState<RawProductRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
@@ -51,15 +79,22 @@ export function CollectedProductsCard() {
   const [deleting, setDeleting] = useState(false);
   const [converting, setConverting] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [jobFilter, setJobFilter] = useState<JobFilterValue>("all");
   const { toast } = useToast();
 
   const pageSize = 30;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
-  const loadProducts = useCallback(async (targetPage: number) => {
+  function toJobIdParam(value: JobFilterValue): string | null | undefined {
+    if (value === "all") return undefined;
+    if (value === "unassigned") return null;
+    return value;
+  }
+
+  const loadProducts = useCallback(async (targetPage: number, filterValue: JobFilterValue) => {
     setLoading(true);
     setSelected(new Set());
-    const result = await fetchCollectedProducts(targetPage, pageSize);
+    const result = await fetchCollectedProducts(targetPage, pageSize, toJobIdParam(filterValue));
     setLoading(false);
 
     if (!result.success) {
@@ -70,11 +105,11 @@ export function CollectedProductsCard() {
     setProducts(result.products ?? []);
     setTotalCount(result.totalCount ?? 0);
     setPage(targetPage);
-  }, [toast]);
+  }, [pageSize, toast]);
 
   useEffect(() => {
-    loadProducts(1);
-  }, [loadProducts]);
+    loadProducts(1, jobFilter);
+  }, [jobFilter, loadProducts]);
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
@@ -103,7 +138,7 @@ export function CollectedProductsCard() {
     }
 
     toast({ title: `${selected.size}개 상품 삭제됨` });
-    loadProducts(page);
+    loadProducts(page, jobFilter);
   }
 
   async function handleConvert() {
@@ -122,7 +157,7 @@ export function CollectedProductsCard() {
       title: "상품관리로 변환 완료",
       description: `${result.convertedCount}개 상품이 상품관리에 등록되었습니다.`,
     });
-    loadProducts(page);
+    loadProducts(page, jobFilter);
   }
 
   async function handleConvertAll() {
@@ -132,7 +167,7 @@ export function CollectedProductsCard() {
     const allIds: string[] = [];
     let fetchPage = 1;
     while (true) {
-      const result = await fetchCollectedProducts(fetchPage, 100);
+      const result = await fetchCollectedProducts(fetchPage, 100, toJobIdParam(jobFilter));
       if (!result.success || !result.products || result.products.length === 0) break;
       allIds.push(...result.products.map((p) => p.id));
       if (allIds.length >= (result.totalCount ?? 0)) break;
@@ -157,7 +192,7 @@ export function CollectedProductsCard() {
       title: "전체 변환 완료",
       description: `${result.convertedCount}개 상품이 상품관리에 등록되었습니다.`,
     });
-    loadProducts(page);
+    loadProducts(page, jobFilter);
   }
 
   return (
@@ -173,9 +208,36 @@ export function CollectedProductsCard() {
               총 {totalCount.toLocaleString()}개 수집됨
             </CardDescription>
           </div>
-          <Button variant="outline" size="sm" onClick={() => loadProducts(page)} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Select
+              value={jobFilter}
+              onValueChange={(value) => {
+                setJobFilter(value);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-[360px]">
+                <SelectValue placeholder="수집 그룹 선택" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">전체 그룹</SelectItem>
+                <SelectItem value="unassigned">그룹 미지정</SelectItem>
+                {jobs.map((job) => (
+                  <SelectItem key={job.id} value={job.id}>
+                    {formatJobLabel(job)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => loadProducts(page, jobFilter)}
+              disabled={loading}
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -290,7 +352,7 @@ export function CollectedProductsCard() {
                   variant="outline"
                   size="sm"
                   disabled={page <= 1 || loading}
-                  onClick={() => loadProducts(page - 1)}
+                  onClick={() => loadProducts(page - 1, jobFilter)}
                 >
                   <ChevronLeft className="h-4 w-4" />
                   이전
@@ -302,7 +364,7 @@ export function CollectedProductsCard() {
                   variant="outline"
                   size="sm"
                   disabled={page >= totalPages || loading}
-                  onClick={() => loadProducts(page + 1)}
+                  onClick={() => loadProducts(page + 1, jobFilter)}
                 >
                   다음
                   <ChevronRight className="h-4 w-4" />

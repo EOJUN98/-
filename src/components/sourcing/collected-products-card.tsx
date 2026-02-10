@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import {
   fetchCollectedProducts,
   fetchRawProductStatusSummary,
@@ -8,10 +8,12 @@ import {
   convertRawToProducts,
   type RawProductRow,
 } from "@/actions/sourcing-11st";
+import { updateCollectionJobDisplayNameAction } from "@/actions/sourcing";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -19,6 +21,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import {
   Card,
   CardContent,
@@ -90,6 +101,9 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [jobFilter, setJobFilter] = useState<JobFilterValue>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("all");
+  const [editOpen, setEditOpen] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
 
   const pageSize = 30;
@@ -247,6 +261,18 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
   const convertedPct = Math.round(((statusSummary?.converted ?? 0) / denom) * 100);
   const otherPct = Math.max(0, 100 - collectedPct - detailPct - convertedPct);
 
+  const selectedJob = useMemo(() => {
+    if (jobFilter === "all" || jobFilter === "unassigned") return null;
+    return jobs.find((j) => j.id === jobFilter) ?? null;
+  }, [jobFilter, jobs]);
+
+  const selectedJobName = useMemo(() => {
+    if (!selectedJob) return "";
+    const name = (selectedJob.display_name ?? "").trim()
+      || (typeof selectedJob.options?.displayName === "string" ? selectedJob.options.displayName.trim() : "");
+    return name;
+  }, [selectedJob]);
+
   return (
     <Card>
       <CardHeader>
@@ -281,6 +307,66 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
                 ))}
               </SelectContent>
             </Select>
+            {selectedJob && (
+              <Dialog
+                open={editOpen}
+                onOpenChange={(open) => {
+                  setEditOpen(open);
+                  if (open) setEditName(selectedJobName);
+                }}
+              >
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    그룹명 수정
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>검색필터명 수정</DialogTitle>
+                    <DialogDescription>
+                      이 그룹(수집 작업)의 표시 이름을 변경합니다.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-2">
+                    <Input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      maxLength={80}
+                      placeholder="예: 알리 여름 원피스"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      1~80자. 저장 후 그룹 선택 드롭다운에 반영됩니다.
+                    </p>
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      onClick={() => {
+                        const next = editName.trim();
+                        if (!next) {
+                          toast({ title: "필터명을 입력해주세요", variant: "destructive" });
+                          return;
+                        }
+                        startTransition(async () => {
+                          const res = await updateCollectionJobDisplayNameAction({
+                            jobId: selectedJob.id,
+                            displayName: next,
+                          });
+                          if (!res.success) {
+                            toast({ title: "수정 실패", description: res.error, variant: "destructive" });
+                            return;
+                          }
+                          toast({ title: "그룹명이 수정되었습니다" });
+                          setEditOpen(false);
+                        });
+                      }}
+                      disabled={isPending}
+                    >
+                      {isPending ? "저장 중..." : "저장"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            )}
             <Select
               value={statusFilter}
               onValueChange={(value) => {

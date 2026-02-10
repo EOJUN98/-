@@ -55,6 +55,63 @@ interface ActionResult {
   jobId?: string;
 }
 
+// ── Update Collection Job Display Name ──
+
+const updateJobDisplayNameSchema = z.object({
+  jobId: z.string().uuid("올바른 작업 ID가 아닙니다"),
+  displayName: z.string().trim().min(1, "필터명을 입력해주세요").max(80, "필터명은 80자 이내로 입력해주세요"),
+});
+
+export async function updateCollectionJobDisplayNameAction(input: z.infer<typeof updateJobDisplayNameSchema>) {
+  const parsed = updateJobDisplayNameSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false as const, error: parsed.error.errors.map((e) => e.message).join(", ") };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { success: false as const, error: "로그인이 필요합니다" };
+
+  const { data: row, error: fetchError } = await supabase
+    .from("collection_jobs")
+    .select("options")
+    .eq("id", parsed.data.jobId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (fetchError) return { success: false as const, error: fetchError.message };
+  if (!row) return { success: false as const, error: "작업을 찾을 수 없습니다" };
+
+  const prevOptions = (row.options ?? {}) as Record<string, unknown>;
+  const nextOptions = { ...prevOptions, displayName: parsed.data.displayName };
+
+  // Prefer updating display_name (newer schema). If the column isn't migrated yet,
+  // retry by updating options only.
+  const { error: updateError } = await supabase
+    .from("collection_jobs")
+    .update({ display_name: parsed.data.displayName, options: nextOptions })
+    .eq("id", parsed.data.jobId)
+    .eq("user_id", user.id);
+
+  if (!updateError) return { success: true as const };
+
+  const msg = updateError.message.toLowerCase();
+  const isMissingColumn = msg.includes("display_name") && msg.includes("does not exist");
+  if (!isMissingColumn) return { success: false as const, error: updateError.message };
+
+  const { error: fallbackError } = await supabase
+    .from("collection_jobs")
+    .update({ options: nextOptions })
+    .eq("id", parsed.data.jobId)
+    .eq("user_id", user.id);
+
+  if (fallbackError) return { success: false as const, error: fallbackError.message };
+  return { success: true as const };
+}
+
 // ── Create Collection Job ──
 export async function createCollectionJob(
   input: CreateJobInput

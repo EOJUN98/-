@@ -420,6 +420,13 @@ export async function bulkCollect11stProducts(
     }
   }
 
+  // Ensure the job is marked completed even when the site returns fewer results than requested.
+  await supabase
+    .from("collection_jobs")
+    .update({ total_collected: totalCollected, status: "completed" })
+    .eq("id", jobId)
+    .eq("user_id", userId);
+
   return {
     success: true,
     totalCollected,

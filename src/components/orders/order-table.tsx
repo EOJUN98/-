@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-import { updateOrderStatusAction, bulkUpdateOrderStatusAction, triggerOrderSyncAction } from "@/actions/orders";
+import { bulkStepOrderStatusAction, triggerOrderSyncAction, updateOrderStatusAction } from "@/actions/orders";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,7 +91,7 @@ export function OrderTable({ initialData }: OrderTableProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
-  const [bulkStatus, setBulkStatus] = useState<OrderInternalStatus>("ordered");
+  const [exportSelectKey, setExportSelectKey] = useState(0);
   const { toast } = useToast();
 
   const marketOptions = useMemo(() => {
@@ -157,26 +157,102 @@ export function OrderTable({ initialData }: OrderTableProps) {
     toast({ title: "상태 변경 완료" });
   }
 
-  async function handleBulkStatusChange() {
+  async function handleBulkStep(direction: "up" | "down") {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
 
-    const result = await bulkUpdateOrderStatusAction({ orderIds: ids, status: bulkStatus });
+    const result = await bulkStepOrderStatusAction({ orderIds: ids, direction });
     if (!result.success) {
-      toast({ title: "일괄 변경 실패", description: result.error, variant: "destructive" });
+      toast({ title: "일괄 이동 실패", description: result.error, variant: "destructive" });
       return;
     }
-    const updatedIds = new Set(result.updatedIds ?? []);
-    setOrders((prev) => prev.map((o) => updatedIds.has(o.id) ? { ...o, internalStatus: bulkStatus } : o));
-    setSelectedIds(new Set());
+
+    const updates = result.updates ?? [];
+    const updateMap = new Map<string, OrderInternalStatus>(updates.map((u) => [u.id, u.newStatus]));
+    setOrders((prev) =>
+      prev.map((o) => updateMap.has(o.id) ? { ...o, internalStatus: updateMap.get(o.id) as OrderInternalStatus } : o)
+    );
+
     const skippedCount = result.skippedCount ?? 0;
     const skippedSample = result.skippedSample ?? null;
     toast({
-      title: "일괄 변경 완료",
+      title: "일괄 이동 완료",
       description: skippedCount > 0
-        ? `변경 ${result.updatedCount}건 / 스킵 ${skippedCount}건${skippedSample ? ` (예: ${skippedSample})` : ""}`
-        : `${result.updatedCount}건 상태 변경됨`
+        ? `이동 ${result.updatedCount}건 / 스킵 ${skippedCount}건${skippedSample ? ` (예: ${skippedSample})` : ""}`
+        : `${result.updatedCount}건 상태 이동됨`,
     });
+  }
+
+  async function downloadExcel(mode: "search" | "all" | "shipping") {
+    const now = new Date();
+    const ts = [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, "0"),
+      String(now.getDate()).padStart(2, "0"),
+      String(now.getHours()).padStart(2, "0"),
+      String(now.getMinutes()).padStart(2, "0"),
+    ].join("");
+
+    const XLSX = await import("xlsx");
+
+    function statusLabel(status: string) {
+      return STATUS_LABELS[status] ?? status;
+    }
+
+    function toRow(order: OrderListItem) {
+      return {
+        주문일시: order.orderDate ?? order.createdAt,
+        주문번호: order.orderNumber,
+        마켓: order.marketCode ?? "",
+        내부상태: statusLabel(order.internalStatus),
+        마켓상태: order.marketStatus ?? "",
+        수취인: order.buyerName ?? "",
+        전화번호: order.buyerPhone ?? "",
+        배송지: order.shippingAddress ?? "",
+        결제금액: order.totalPrice,
+        해외주문번호: order.overseasOrderNumber ?? "",
+        해외트래킹: order.overseasTrackingNumber ?? "",
+        포워더: order.forwarderId ?? "",
+        국내송장: order.trackingNumber ?? "",
+        택배사: order.courierCode ?? "",
+      };
+    }
+
+    const wb = XLSX.utils.book_new();
+
+    if (mode === "search") {
+      const sheet = XLSX.utils.json_to_sheet(filteredOrders.map(toRow));
+      XLSX.utils.book_append_sheet(wb, sheet, "검색결과");
+      XLSX.writeFile(wb, `orders_search_${ts}.xlsx`);
+      return;
+    }
+
+    if (mode === "all") {
+      const sheet = XLSX.utils.json_to_sheet(orders.map(toRow));
+      XLSX.utils.book_append_sheet(wb, sheet, "전체주문");
+      XLSX.writeFile(wb, `orders_all_${ts}.xlsx`);
+      return;
+    }
+
+    const target = selectedIds.size > 0
+      ? orders.filter((o) => selectedIds.has(o.id))
+      : filteredOrders;
+
+    const slipRows = target.map((o) => ({
+      주문번호: o.orderNumber,
+      수취인: o.buyerName ?? "",
+      전화번호: o.buyerPhone ?? "",
+      배송지: o.shippingAddress ?? "",
+      국내송장: o.trackingNumber ?? "",
+      택배사: o.courierCode ?? "",
+      해외트래킹: o.overseasTrackingNumber ?? "",
+      포워더: o.forwarderId ?? "",
+      내부상태: statusLabel(o.internalStatus),
+    }));
+
+    const sheet = XLSX.utils.json_to_sheet(slipRows);
+    XLSX.utils.book_append_sheet(wb, sheet, "배송전표");
+    XLSX.writeFile(wb, `orders_shipping_${ts}.xlsx`);
   }
 
   async function handleSync() {
@@ -215,8 +291,8 @@ export function OrderTable({ initialData }: OrderTableProps) {
         <span className="text-red-600">교환 <strong>{statusCounts.exchanged}</strong></span>
       </div>
 
-      {/* 필터 + 동기화 버튼 */}
-      <div className="grid gap-3 rounded-lg border bg-card p-4 md:grid-cols-[1fr_160px_160px_auto_auto] md:items-center">
+      {/* 필터 + 동기화 + 엑셀 */}
+      <div className="grid gap-3 rounded-lg border bg-card p-4 md:grid-cols-[1fr_160px_160px_auto_auto_auto] md:items-center">
         <Input
           value={keyword}
           onChange={(event) => setKeyword(event.target.value)}
@@ -252,24 +328,37 @@ export function OrderTable({ initialData }: OrderTableProps) {
         <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing}>
           {syncing ? "동기화 중..." : "주문 동기화"}
         </Button>
+
+        <Select
+          key={exportSelectKey}
+          onValueChange={(value) => {
+            const v = value as "search" | "all" | "shipping";
+            setExportSelectKey((prev) => prev + 1);
+            downloadExcel(v).catch((err) => {
+              toast({ title: "엑셀 다운로드 실패", description: String(err), variant: "destructive" });
+            });
+          }}
+        >
+          <SelectTrigger className="w-[160px]">
+            <SelectValue placeholder="엑셀 다운로드" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="search">검색결과 내보내기</SelectItem>
+            <SelectItem value="all">전체 주문 내보내기</SelectItem>
+            <SelectItem value="shipping">배송전표 내보내기</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* 일괄 상태 변경 바 */}
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-3 rounded-lg border bg-muted/30 p-3">
           <span className="text-sm font-medium">{selectedIds.size}건 선택됨</span>
-          <Select value={bulkStatus} onValueChange={(v) => setBulkStatus(v as OrderInternalStatus)}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {ALL_STATUSES.map((s) => (
-                <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button size="sm" onClick={handleBulkStatusChange}>
-            일괄 변경
+          <Button size="sm" onClick={() => handleBulkStep("down")}>
+            한단계 DOWN
+          </Button>
+          <Button size="sm" onClick={() => handleBulkStep("up")}>
+            한단계 UP
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
             선택 해제

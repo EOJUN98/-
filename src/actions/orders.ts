@@ -354,6 +354,103 @@ export async function updateOrderMemoAction(input: z.infer<typeof updateOrderMem
   return { success: true as const, memoUpdatedAt: new Date().toISOString() };
 }
 
+// ── Bulk status step (UP/DOWN) ──
+
+const bulkStepStatusSchema = z.object({
+  orderIds: z.array(z.string().uuid()).min(1),
+  direction: z.enum(["up", "down"]),
+});
+
+export async function bulkStepOrderStatusAction(input: z.infer<typeof bulkStepStatusSchema>) {
+  const parsed = bulkStepStatusSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false as const, error: parsed.error.issues.map((i) => i.message).join(", ") };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false as const, error: "로그인이 필요합니다" };
+
+  const { data: rows, error: fetchError } = await supabase
+    .from("orders")
+    .select("id, internal_status")
+    .eq("user_id", user.id)
+    .in("id", parsed.data.orderIds);
+
+  if (fetchError) return { success: false as const, error: fetchError.message };
+
+  const byId = new Map<string, string | null>();
+  for (const row of (rows ?? []) as Array<{ id: string; internal_status: string | null }>) {
+    byId.set(row.id, row.internal_status);
+  }
+
+  const updates: Array<{ id: string; newStatus: OrderInternalStatus }> = [];
+  const skipped: Array<{ id: string; current: string | null }> = [];
+
+  for (const orderId of parsed.data.orderIds) {
+    const current = (byId.get(orderId) ?? "collected")?.trim() ?? "collected";
+
+    // Do not step terminal/exception statuses here.
+    if (current === "cancelled" || current === "returned" || current === "exchanged") {
+      skipped.push({ id: orderId, current });
+      continue;
+    }
+
+    const idx = FLOW_STATUSES.indexOf(current as OrderInternalStatus);
+    if (idx < 0) {
+      skipped.push({ id: orderId, current });
+      continue;
+    }
+
+    const nextIdx = parsed.data.direction === "up" ? idx + 1 : idx - 1;
+    if (nextIdx < 0 || nextIdx >= FLOW_STATUSES.length) {
+      skipped.push({ id: orderId, current });
+      continue;
+    }
+
+    updates.push({ id: orderId, newStatus: FLOW_STATUSES[nextIdx] });
+  }
+
+  if (updates.length === 0) {
+    const sample = skipped[0] ? `${skipped[0].id.slice(0, 8)}: ${(skipped[0].current ?? "collected")}` : null;
+    return {
+      success: false as const,
+      error: sample ? `이동 가능한 주문이 없습니다. 예: ${sample}` : "이동 가능한 주문이 없습니다",
+    };
+  }
+
+  // Group updates by target status to reduce DB round-trips.
+  const idsByStatus = new Map<OrderInternalStatus, string[]>();
+  for (const u of updates) {
+    const list = idsByStatus.get(u.newStatus) ?? [];
+    list.push(u.id);
+    idsByStatus.set(u.newStatus, list);
+  }
+
+  for (const [status, ids] of idsByStatus.entries()) {
+    const { error: updateError } = await supabase
+      .from("orders")
+      .update({ internal_status: status })
+      .eq("user_id", user.id)
+      .in("id", ids);
+
+    if (updateError) return { success: false as const, error: updateError.message };
+  }
+
+  revalidatePath("/orders");
+  const skippedSample = skipped[0]
+    ? `${skipped[0].id.slice(0, 8)}: ${(skipped[0].current ?? "collected")}`
+    : null;
+
+  return {
+    success: true as const,
+    updatedCount: updates.length,
+    updates,
+    skippedCount: skipped.length,
+    skippedSample,
+  };
+}
+
 // ── 수동 주문 동기화 트리거 ──
 
 export async function triggerOrderSyncAction() {

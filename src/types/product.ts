@@ -1,4 +1,4 @@
-export type PublishMarketCode = "coupang" | "smartstore";
+export type PublishMarketCode = "coupang" | "smartstore" | "11st" | "gmarket" | "auction";
 
 export type PublishStatus = "success" | "failed" | "pending" | null;
 

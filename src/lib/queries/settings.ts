@@ -13,7 +13,7 @@ interface MarketConfigRow {
   updated_at: string | null;
 }
 
-const SUPPORTED_MARKETS: SupportedMarketCode[] = ["smartstore", "coupang"];
+const SUPPORTED_MARKETS: SupportedMarketCode[] = ["smartstore", "coupang", "11st", "gmarket", "auction"];
 
 function createDefaultSummary(marketCode: SupportedMarketCode): MarketConfigSummary {
   return {
@@ -29,7 +29,13 @@ function createDefaultSummary(marketCode: SupportedMarketCode): MarketConfigSumm
 }
 
 function mapRowToSummary(row: MarketConfigRow): MarketConfigSummary | null {
-  if (row.market_code !== "smartstore" && row.market_code !== "coupang") {
+  if (
+    row.market_code !== "smartstore" &&
+    row.market_code !== "coupang" &&
+    row.market_code !== "11st" &&
+    row.market_code !== "gmarket" &&
+    row.market_code !== "auction"
+  ) {
     return null;
   }
 

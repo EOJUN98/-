@@ -13,7 +13,7 @@ import type { PublishMarketCode } from "@/types/product";
 
 const publishInputSchema = z.object({
   productId: z.string().uuid(),
-  marketCode: z.enum(["coupang", "smartstore"]),
+  marketCode: z.enum(["coupang", "smartstore", "11st", "gmarket", "auction"]),
   optimizeTitle: z.boolean().default(true)
 });
 
@@ -220,7 +220,10 @@ async function insertPublishLog(params: {
 
 function marketLabel(marketCode: PublishMarketCode) {
   if (marketCode === "coupang") return "쿠팡";
-  return "스마트스토어";
+  if (marketCode === "smartstore") return "스마트스토어";
+  if (marketCode === "11st") return "11번가";
+  if (marketCode === "gmarket") return "G마켓";
+  return "옥션";
 }
 
 function buildPublishableProduct(params: {
@@ -315,6 +318,10 @@ async function publishByMarket(params: {
       secretKey,
       vendorId
     });
+  }
+
+  if (params.marketCode === "11st" || params.marketCode === "gmarket" || params.marketCode === "auction") {
+    throw new Error(`${marketLabel(params.marketCode)} 전송은 아직 준비중입니다`);
   }
 
   if (!apiKey || !secretKey) {

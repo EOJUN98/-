@@ -32,10 +32,22 @@ const MARKET_META: Record<SupportedMarketCode, { title: string; description: str
   coupang: {
     title: "쿠팡",
     description: "access_key / secret_key / vendor_id를 등록하여 상품 전송을 활성화합니다."
+  },
+  "11st": {
+    title: "11번가 (준비중)",
+    description: "전송 모듈 구현 전이며, 설정/카테고리 매핑부터 연결합니다."
+  },
+  gmarket: {
+    title: "G마켓 (준비중)",
+    description: "전송 모듈 구현 전이며, 설정/카테고리 매핑부터 연결합니다."
+  },
+  auction: {
+    title: "옥션 (준비중)",
+    description: "전송 모듈 구현 전이며, 설정/카테고리 매핑부터 연결합니다."
   }
 };
 
-const MARKET_ORDER: SupportedMarketCode[] = ["smartstore", "coupang"];
+const MARKET_ORDER: SupportedMarketCode[] = ["smartstore", "coupang", "11st", "gmarket", "auction"];
 
 function toFormState(config: MarketConfigSummary | undefined): MarketFormState {
   return {
@@ -67,7 +79,10 @@ export function MarketConfigPanel({ initialConfigs }: MarketConfigPanelProps) {
     const byMarket = toMap(initialConfigs);
     return {
       smartstore: toFormState(byMarket.get("smartstore")),
-      coupang: toFormState(byMarket.get("coupang"))
+      coupang: toFormState(byMarket.get("coupang")),
+      "11st": toFormState(byMarket.get("11st")),
+      gmarket: toFormState(byMarket.get("gmarket")),
+      auction: toFormState(byMarket.get("auction")),
     } as Record<SupportedMarketCode, MarketFormState>;
   }, [initialConfigs]);
 

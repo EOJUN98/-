@@ -9,7 +9,7 @@ import type { MarketConfigSummary, SourcingConfig, MarketFeeConfig } from "@/typ
 import { DEFAULT_MARKET_FEES } from "@/types/settings";
 
 const saveMarketConfigSchema = z.object({
-  marketCode: z.enum(["coupang", "smartstore"]),
+  marketCode: z.enum(["coupang", "smartstore", "11st", "gmarket", "auction"]),
   apiKey: z.string().trim().optional(),
   secretKey: z.string().trim().optional(),
   vendorId: z.string().trim().optional(),
@@ -33,7 +33,7 @@ interface MarketConfigRow {
 function mapRowToSummary(row: MarketConfigRow): MarketConfigSummary {
   return {
     id: row.id,
-    marketCode: row.market_code === "coupang" ? "coupang" : "smartstore",
+    marketCode: row.market_code as MarketConfigSummary["marketCode"],
     isConfigured: Boolean(row.api_key) && Boolean(row.secret_key),
     vendorConfigured: Boolean((row.vendor_id ?? "").trim()),
     isActive: Boolean(row.is_active),
@@ -107,9 +107,7 @@ export async function saveMarketConfigAction(input: z.infer<typeof saveMarketCon
     }
   }
 
-  const nextVendorId = parsed.data.marketCode === "coupang"
-    ? (parsed.data.vendorId?.trim() || existingRow?.vendor_id || null)
-    : null;
+  const nextVendorId = parsed.data.vendorId?.trim() || existingRow?.vendor_id || null;
 
   if (parsed.data.isActive) {
     if (!encryptedApiKey || !encryptedSecretKey) {
@@ -315,7 +313,7 @@ export async function saveSourcingConfigAction(
 
 // ── API 연결 테스트 ──
 
-export async function testMarketConnectionAction(marketCode: "coupang" | "smartstore") {
+export async function testMarketConnectionAction(marketCode: z.infer<typeof saveMarketConfigSchema>["marketCode"]) {
   const supabase = createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false as const, error: "로그인이 필요합니다" };
@@ -334,6 +332,13 @@ export async function testMarketConnectionAction(marketCode: "coupang" | "smarts
   try {
     const apiKey = decryptSecretIfNeeded(config.api_key as string) ?? "";
     const secretKey = decryptSecretIfNeeded(config.secret_key as string) ?? "";
+
+    if (marketCode === "11st" || marketCode === "gmarket" || marketCode === "auction") {
+      return {
+        success: false as const,
+        error: "아직 전송 모듈이 준비되지 않았습니다. (설정 저장/카테고리 매핑까지만 가능)"
+      };
+    }
 
     if (marketCode === "smartstore") {
       const tokenRes = await fetch("https://api.commerce.naver.com/external/v1/oauth2/token", {

@@ -29,9 +29,14 @@ interface OrderDetailDialogProps {
 const STATUS_LABELS: Record<string, string> = {
   collected: "수집됨",
   ordered: "발주완료",
-  shipped: "배송중",
+  overseas_shipping: "해외배송중",
+  domestic_arrived: "국내입고",
+  shipped: "국내배송중",
   delivered: "배송완료",
+  confirmed: "구매확정",
   cancelled: "취소",
+  returned: "반품",
+  exchanged: "교환",
 };
 
 function formatPrice(value: number) {

@@ -7,11 +7,61 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { OrderDetail, OrderItemDetail, OrderInternalStatus } from "@/types/order";
 
+const FLOW_STATUSES: OrderInternalStatus[] = [
+  "collected",
+  "ordered",
+  "overseas_shipping",
+  "domestic_arrived",
+  "shipped",
+  "delivered",
+  "confirmed",
+];
+
+function isFlowStatus(value: string): value is OrderInternalStatus {
+  return FLOW_STATUSES.includes(value as OrderInternalStatus);
+}
+
+function canTransitionStatus(params: { current: string | null; next: OrderInternalStatus }) {
+  const current = (params.current ?? "collected").trim();
+  const next = params.next;
+
+  if (current === next) return true;
+
+  // Terminal statuses should not be moved back into the flow.
+  if (current === "cancelled" || current === "exchanged") return false;
+
+  // Special rules: cancelled/returned are allowed from anywhere in the flow.
+  if (next === "cancelled") return current !== "exchanged";
+  if (next === "returned") return current !== "cancelled" && current !== "exchanged";
+
+  // Exchanged typically follows shipped/delivered/confirmed or returned.
+  if (next === "exchanged") {
+    return current === "returned" || current === "shipped" || current === "delivered" || current === "confirmed";
+  }
+
+  // Main flow: forward-only.
+  if (!isFlowStatus(current)) return false;
+  const fromIndex = FLOW_STATUSES.indexOf(current);
+  const toIndex = FLOW_STATUSES.indexOf(next);
+  return fromIndex >= 0 && toIndex >= 0 && fromIndex < toIndex;
+}
+
 // ── 주문 상태 변경 (단건) ──
 
 const updateStatusSchema = z.object({
   orderId: z.string().uuid(),
-  status: z.enum(["collected", "ordered", "shipped", "delivered", "cancelled"]),
+  status: z.enum([
+    "collected",
+    "ordered",
+    "overseas_shipping",
+    "domestic_arrived",
+    "shipped",
+    "delivered",
+    "confirmed",
+    "cancelled",
+    "returned",
+    "exchanged",
+  ]),
 });
 
 export async function updateOrderStatusAction(input: z.infer<typeof updateStatusSchema>) {
@@ -23,6 +73,24 @@ export async function updateOrderStatusAction(input: z.infer<typeof updateStatus
   const supabase = createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false as const, error: "로그인이 필요합니다" };
+
+  const { data: currentRow, error: currentError } = await supabase
+    .from("orders")
+    .select("internal_status")
+    .eq("id", parsed.data.orderId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (currentError) return { success: false as const, error: currentError.message };
+  if (!currentRow) return { success: false as const, error: "주문을 찾지 못했습니다" };
+
+  const currentStatus = (currentRow as { internal_status: string | null }).internal_status;
+  if (!canTransitionStatus({ current: currentStatus, next: parsed.data.status as OrderInternalStatus })) {
+    return {
+      success: false as const,
+      error: `상태 전이 규칙 위반: ${(currentStatus ?? "collected")} → ${parsed.data.status}`,
+    };
+  }
 
   const { error } = await supabase
     .from("orders")
@@ -40,7 +108,18 @@ export async function updateOrderStatusAction(input: z.infer<typeof updateStatus
 
 const bulkUpdateStatusSchema = z.object({
   orderIds: z.array(z.string().uuid()).min(1),
-  status: z.enum(["collected", "ordered", "shipped", "delivered", "cancelled"]),
+  status: z.enum([
+    "collected",
+    "ordered",
+    "overseas_shipping",
+    "domestic_arrived",
+    "shipped",
+    "delivered",
+    "confirmed",
+    "cancelled",
+    "returned",
+    "exchanged",
+  ]),
 });
 
 export async function bulkUpdateOrderStatusAction(input: z.infer<typeof bulkUpdateStatusSchema>) {
@@ -53,16 +132,55 @@ export async function bulkUpdateOrderStatusAction(input: z.infer<typeof bulkUpda
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false as const, error: "로그인이 필요합니다" };
 
-  const { error, count } = await supabase
+  const { data: rows, error: fetchError } = await supabase
+    .from("orders")
+    .select("id, internal_status")
+    .eq("user_id", user.id)
+    .in("id", parsed.data.orderIds);
+
+  if (fetchError) return { success: false as const, error: fetchError.message };
+
+  const byId = new Map<string, string | null>();
+  for (const row of (rows ?? []) as Array<{ id: string; internal_status: string | null }>) {
+    byId.set(row.id, row.internal_status);
+  }
+
+  const updatedIds: string[] = [];
+  const skipped: Array<{ id: string; current: string | null }> = [];
+
+  for (const id of parsed.data.orderIds) {
+    const current = byId.get(id) ?? null;
+    if (canTransitionStatus({ current, next: parsed.data.status as OrderInternalStatus })) {
+      updatedIds.push(id);
+    } else {
+      skipped.push({ id, current });
+    }
+  }
+
+  if (updatedIds.length === 0) {
+    const sample = skipped[0] ? `${skipped[0].id.slice(0, 8)}: ${(skipped[0].current ?? "collected")}→${parsed.data.status}` : null;
+    return { success: false as const, error: sample ? `변경 가능한 주문이 없습니다. 예: ${sample}` : "변경 가능한 주문이 없습니다" };
+  }
+
+  const { error } = await supabase
     .from("orders")
     .update({ internal_status: parsed.data.status })
     .eq("user_id", user.id)
-    .in("id", parsed.data.orderIds);
+    .in("id", updatedIds);
 
   if (error) return { success: false as const, error: error.message };
 
   revalidatePath("/orders");
-  return { success: true as const, updatedCount: count ?? parsed.data.orderIds.length };
+  const skippedSample = skipped[0]
+    ? `${skipped[0].id.slice(0, 8)}: ${(skipped[0].current ?? "collected")}→${parsed.data.status}`
+    : null;
+  return {
+    success: true as const,
+    updatedCount: updatedIds.length,
+    updatedIds,
+    skippedCount: skipped.length,
+    skippedSample,
+  };
 }
 
 // ── 주문 상세 조회 (아이템 포함) ──

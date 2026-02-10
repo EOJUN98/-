@@ -33,20 +33,41 @@ interface OrderTableProps {
 const STATUS_LABELS: Record<string, string> = {
   collected: "수집됨",
   ordered: "발주완료",
-  shipped: "배송중",
+  overseas_shipping: "해외배송중",
+  domestic_arrived: "국내입고",
+  shipped: "국내배송중",
   delivered: "배송완료",
-  cancelled: "취소"
+  confirmed: "구매확정",
+  cancelled: "취소",
+  returned: "반품",
+  exchanged: "교환"
 };
 
 const STATUS_BADGE_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   collected: "outline",
   ordered: "default",
+  overseas_shipping: "secondary",
+  domestic_arrived: "secondary",
   shipped: "secondary",
   delivered: "secondary",
-  cancelled: "destructive"
+  confirmed: "default",
+  cancelled: "destructive",
+  returned: "destructive",
+  exchanged: "destructive",
 };
 
-const ALL_STATUSES: OrderInternalStatus[] = ["collected", "ordered", "shipped", "delivered", "cancelled"];
+const ALL_STATUSES: OrderInternalStatus[] = [
+  "collected",
+  "ordered",
+  "overseas_shipping",
+  "domestic_arrived",
+  "shipped",
+  "delivered",
+  "confirmed",
+  "cancelled",
+  "returned",
+  "exchanged",
+];
 
 function formatDate(value: string | null) {
   if (!value) return "-";
@@ -143,9 +164,17 @@ export function OrderTable({ initialData }: OrderTableProps) {
       toast({ title: "일괄 변경 실패", description: result.error, variant: "destructive" });
       return;
     }
-    setOrders((prev) => prev.map((o) => ids.includes(o.id) ? { ...o, internalStatus: bulkStatus } : o));
+    const updatedIds = new Set(result.updatedIds ?? []);
+    setOrders((prev) => prev.map((o) => updatedIds.has(o.id) ? { ...o, internalStatus: bulkStatus } : o));
     setSelectedIds(new Set());
-    toast({ title: "일괄 변경 완료", description: `${result.updatedCount}건 상태 변경됨` });
+    const skippedCount = result.skippedCount ?? 0;
+    const skippedSample = result.skippedSample ?? null;
+    toast({
+      title: "일괄 변경 완료",
+      description: skippedCount > 0
+        ? `변경 ${result.updatedCount}건 / 스킵 ${skippedCount}건${skippedSample ? ` (예: ${skippedSample})` : ""}`
+        : `${result.updatedCount}건 상태 변경됨`
+    });
   }
 
   async function handleSync() {
@@ -174,9 +203,14 @@ export function OrderTable({ initialData }: OrderTableProps) {
         <span>전체 <strong>{orders.length}</strong>건</span>
         <span className="text-muted-foreground">수집 <strong>{statusCounts.collected}</strong></span>
         <span className="text-blue-600">발주 <strong>{statusCounts.ordered}</strong></span>
-        <span className="text-orange-600">배송중 <strong>{statusCounts.shipped}</strong></span>
+        <span className="text-slate-600">해외배송 <strong>{statusCounts.overseas_shipping}</strong></span>
+        <span className="text-amber-700">국내입고 <strong>{statusCounts.domestic_arrived}</strong></span>
+        <span className="text-orange-600">국내배송 <strong>{statusCounts.shipped}</strong></span>
         <span className="text-green-600">배송완료 <strong>{statusCounts.delivered}</strong></span>
+        <span className="text-emerald-700">구매확정 <strong>{statusCounts.confirmed}</strong></span>
         <span className="text-red-600">취소 <strong>{statusCounts.cancelled}</strong></span>
+        <span className="text-red-600">반품 <strong>{statusCounts.returned}</strong></span>
+        <span className="text-red-600">교환 <strong>{statusCounts.exchanged}</strong></span>
       </div>
 
       {/* 필터 + 동기화 버튼 */}

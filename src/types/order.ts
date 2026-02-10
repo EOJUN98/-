@@ -1,4 +1,14 @@
-export type OrderInternalStatus = "collected" | "ordered" | "shipped" | "delivered" | "cancelled";
+export type OrderInternalStatus =
+  | "collected"
+  | "ordered"
+  | "overseas_shipping"
+  | "domestic_arrived"
+  | "shipped"
+  | "delivered"
+  | "confirmed"
+  | "cancelled"
+  | "returned"
+  | "exchanged";
 
 export interface OrderListItem {
   id: string;

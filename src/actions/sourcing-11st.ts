@@ -918,3 +918,96 @@ export async function deleteRawProducts(ids: string[]): Promise<{ success: boole
 
   return { success: true };
 }
+
+// ── Group: Bulk Convert/Delete By Job ──
+
+const jobBulkSchema = z.object({
+  jobId: z.string().uuid("올바른 작업 ID가 아닙니다"),
+  status: z.string().trim().min(1).optional(),
+});
+
+export async function convertRawToProductsByJob(
+  input: z.infer<typeof jobBulkSchema>
+): Promise<{ success: boolean; error?: string; convertedCount?: number }> {
+  const parsed = jobBulkSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.errors.map((e) => e.message).join(", ") };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { success: false, error: "로그인이 필요합니다" };
+
+  const settings = await loadSourcingSettings(supabase, user.id);
+
+  const pageSize = 500;
+  let from = 0;
+  let converted = 0;
+
+  while (true) {
+    let q = supabase
+      .from("raw_products")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("job_id", parsed.data.jobId)
+      .order("created_at", { ascending: false })
+      .range(from, from + pageSize - 1);
+
+    if (parsed.data.status) q = q.eq("status", parsed.data.status);
+
+    const { data, error } = await q;
+    if (error) return { success: false, error: error.message };
+
+    const ids = (data ?? []).map((r) => r.id as string).filter(Boolean);
+    if (ids.length === 0) break;
+
+    converted += await autoConvertRawToProducts(supabase, user.id, ids, settings.defaultMarginRate);
+    from += pageSize;
+  }
+
+  return { success: true, convertedCount: converted };
+}
+
+export async function deleteRawProductsByJob(
+  input: z.infer<typeof jobBulkSchema>
+): Promise<{ success: boolean; error?: string; deletedCount?: number }> {
+  const parsed = jobBulkSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.errors.map((e) => e.message).join(", ") };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { success: false, error: "로그인이 필요합니다" };
+
+  let countQuery = supabase
+    .from("raw_products")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .eq("job_id", parsed.data.jobId);
+
+  let deleteQuery = supabase
+    .from("raw_products")
+    .delete()
+    .eq("user_id", user.id)
+    .eq("job_id", parsed.data.jobId);
+
+  if (parsed.data.status) {
+    countQuery = countQuery.eq("status", parsed.data.status);
+    deleteQuery = deleteQuery.eq("status", parsed.data.status);
+  }
+
+  const { count, error: countError } = await countQuery;
+  if (countError) return { success: false, error: countError.message };
+
+  const { error: deleteError } = await deleteQuery;
+  if (deleteError) return { success: false, error: deleteError.message };
+
+  return { success: true, deletedCount: count ?? 0 };
+}

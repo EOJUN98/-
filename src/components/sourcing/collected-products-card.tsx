@@ -6,6 +6,8 @@ import {
   fetchRawProductStatusSummary,
   deleteRawProducts,
   convertRawToProducts,
+  deleteRawProductsByJob,
+  convertRawToProductsByJob,
   type RawProductRow,
 } from "@/actions/sourcing-11st";
 import { updateCollectionJobDisplayNameAction, updateCollectionJobPolicyAction } from "@/actions/sourcing";
@@ -73,7 +75,7 @@ type CollectionJobLike = {
   created_at: string;
 };
 
-type JobFilterValue = "all" | "unassigned" | string;
+type JobFilterValue = "all" | "unassigned" | "unassigned_only" | string;
 type StatusFilterValue = "all" | "collected" | "detail_crawled" | "converted";
 
 function formatJobLabel(job: CollectionJobLike) {
@@ -118,6 +120,7 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
     if (value === "all") return undefined;
     // UX decision: "미지정"은 '전체 표시' 의미로 사용(미지정만 필터링하지 않음).
     if (value === "unassigned") return undefined;
+    if (value === "unassigned_only") return null;
     return value;
   }
 
@@ -268,6 +271,41 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
     loadSummary(jobFilter);
   }
 
+  async function handleConvertSelectedGroup() {
+    if (!selectedJob) return;
+    setConverting(true);
+    const result = await convertRawToProductsByJob({ jobId: selectedJob.id });
+    setConverting(false);
+
+    if (!result.success) {
+      toast({ title: "그룹 변환 실패", description: result.error, variant: "destructive" });
+      return;
+    }
+
+    toast({
+      title: "그룹 변환 완료",
+      description: `${result.convertedCount ?? 0}개 상품이 상품관리에 등록되었습니다.`,
+    });
+    loadProducts(page, jobFilter, statusFilter);
+    loadSummary(jobFilter);
+  }
+
+  async function handleDeleteSelectedGroup() {
+    if (!selectedJob) return;
+    setDeleting(true);
+    const result = await deleteRawProductsByJob({ jobId: selectedJob.id });
+    setDeleting(false);
+
+    if (!result.success) {
+      toast({ title: "그룹 삭제 실패", description: result.error, variant: "destructive" });
+      return;
+    }
+
+    toast({ title: "그룹 상품 삭제 완료", description: `${result.deletedCount ?? 0}개 삭제됨` });
+    loadProducts(1, jobFilter, statusFilter);
+    loadSummary(jobFilter);
+  }
+
   const summaryTotal = statusSummary?.total ?? 0;
   const denom = Math.max(1, summaryTotal);
   const collectedPct = Math.round(((statusSummary?.collected ?? 0) / denom) * 100);
@@ -276,7 +314,7 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
   const otherPct = Math.max(0, 100 - collectedPct - detailPct - convertedPct);
 
   const selectedJob = useMemo(() => {
-    if (jobFilter === "all" || jobFilter === "unassigned") return null;
+    if (jobFilter === "all" || jobFilter === "unassigned" || jobFilter === "unassigned_only") return null;
     return jobs.find((j) => j.id === jobFilter) ?? null;
   }, [jobFilter, jobs]);
 
@@ -335,6 +373,7 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
               <SelectContent>
                 <SelectItem value="all">전체 그룹</SelectItem>
                 <SelectItem value="unassigned">그룹 미지정(전체 표시)</SelectItem>
+                <SelectItem value="unassigned_only">그룹 미지정만 보기</SelectItem>
                 {jobs.map((job) => {
                   const override = (optimisticJobNames[job.id] ?? "").trim();
                   const jobForLabel = override
@@ -525,6 +564,29 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
               <Button variant="outline" size="sm" onClick={toggleAll}>
                 {selected.size === products.length ? "전체 해제" : "전체 선택"}
               </Button>
+              {selectedJob && (
+                <>
+                  <Button
+                    size="sm"
+                    onClick={handleConvertSelectedGroup}
+                    disabled={converting || deleting}
+                    className="gap-1"
+                  >
+                    {converting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRightLeft className="h-4 w-4" />}
+                    그룹 전체 변환
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={handleDeleteSelectedGroup}
+                    disabled={deleting || converting}
+                    className="gap-1"
+                  >
+                    {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    그룹 전체 삭제
+                  </Button>
+                </>
+              )}
               {selected.size > 0 && (
                 <>
                   <Button

@@ -8,7 +8,8 @@ import {
   convertRawToProducts,
   type RawProductRow,
 } from "@/actions/sourcing-11st";
-import { updateCollectionJobDisplayNameAction } from "@/actions/sourcing";
+import { updateCollectionJobDisplayNameAction, updateCollectionJobPolicyAction } from "@/actions/sourcing";
+import { fetchPolicySummaryList, type PolicyOption } from "@/actions/policy-apply";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -104,6 +105,9 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
   const [editOpen, setEditOpen] = useState(false);
   const [editName, setEditName] = useState("");
   const [optimisticJobNames, setOptimisticJobNames] = useState<Record<string, string>>({});
+  const [optimisticJobPolicies, setOptimisticJobPolicies] = useState<Record<string, string | null>>({});
+  const [policyOptions, setPolicyOptions] = useState<PolicyOption[]>([]);
+  const [policyLoading, setPolicyLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
 
@@ -162,6 +166,15 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
     loadProducts(1, jobFilter, statusFilter);
     loadSummary(jobFilter);
   }, [jobFilter, statusFilter, loadProducts, loadSummary]);
+
+  useEffect(() => {
+    setPolicyLoading(true);
+    fetchPolicySummaryList()
+      .then((res) => {
+        if (res.success) setPolicyOptions(res.policies ?? []);
+      })
+      .finally(() => setPolicyLoading(false));
+  }, []);
 
   function toggleSelect(id: string) {
     setSelected((prev) => {
@@ -275,6 +288,15 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
       || (typeof selectedJob.options?.displayName === "string" ? selectedJob.options.displayName.trim() : "");
     return name;
   }, [optimisticJobNames, selectedJob]);
+
+  const selectedJobPolicyId = useMemo(() => {
+    if (!selectedJob) return null;
+    if (Object.prototype.hasOwnProperty.call(optimisticJobPolicies, selectedJob.id)) {
+      return optimisticJobPolicies[selectedJob.id] ?? null;
+    }
+    const options = (selectedJob.options ?? {}) as Record<string, unknown>;
+    return typeof options.policyId === "string" ? options.policyId : null;
+  }, [optimisticJobPolicies, selectedJob]);
 
   return (
     <Card>
@@ -392,6 +414,38 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
                 </DialogContent>
               </Dialog>
             )}
+            {selectedJob && (
+              <Select
+                value={selectedJobPolicyId ?? "none"}
+                onValueChange={(value) => {
+                  const nextPolicyId = value === "none" ? null : value;
+                  startTransition(async () => {
+                    const res = await updateCollectionJobPolicyAction({
+                      jobId: selectedJob.id,
+                      policyId: nextPolicyId,
+                    });
+                    if (!res.success) {
+                      toast({ title: "정책 저장 실패", description: res.error, variant: "destructive" });
+                      return;
+                    }
+                    setOptimisticJobPolicies((prev) => ({ ...prev, [selectedJob.id]: nextPolicyId }));
+                    toast({ title: "그룹 정책이 저장되었습니다" });
+                  });
+                }}
+              >
+                <SelectTrigger className="w-[220px]">
+                  <SelectValue placeholder="그룹 정책" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">정책 미지정</SelectItem>
+                  {policyOptions.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}{p.isDefault ? " (기본)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <Select
               value={statusFilter}
               onValueChange={(value) => {
@@ -417,6 +471,12 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
             >
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </Button>
+            {policyLoading && (
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                정책 불러오는 중
+              </span>
+            )}
           </div>
         </div>
       </CardHeader>

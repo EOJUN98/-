@@ -124,6 +124,7 @@ const collectSchema = z.object({
       rating: z.string(),
     })
   ).min(1, "최소 1개 상품을 선택해주세요"),
+  groupName: z.string().trim().max(80).optional(),
 });
 
 interface CollectResult {
@@ -152,11 +153,65 @@ export async function collect11stProducts(
     return { success: false, error: "로그인이 필요합니다" };
   }
 
-  // Load user sourcing settings
-  const settings = await loadSourcingSettings(supabase, user.id);
+  const inputData = parsed.data;
+  const userId = user.id;
 
-  const rows = parsed.data.products.map((p) => ({
-    user_id: user.id,
+  // Load user sourcing settings
+  const settings = await loadSourcingSettings(supabase, userId);
+
+  async function createJob() {
+    const displayName = inputData.groupName?.trim()
+      || `11ST 수집 · ${new Date().toLocaleString("ko-KR")}`.slice(0, 80);
+    const searchUrl = "keyword:manual_select";
+    const options = { displayName, source: "manual_select" };
+
+    const { data: jobRow, error } = await supabase
+      .from("collection_jobs")
+      .insert({
+        user_id: userId,
+        site_id: "11st",
+        search_url: searchUrl,
+        display_name: displayName,
+        status: "completed",
+        total_target: inputData.products.length,
+        total_collected: inputData.products.length,
+        options,
+      })
+      .select("id")
+      .single();
+
+    if (!error && jobRow?.id) return jobRow.id as string;
+
+    const msg = (error?.message ?? "").toLowerCase();
+    const isMissingDisplayName = msg.includes("display_name") && msg.includes("does not exist");
+    if (!isMissingDisplayName) return null;
+
+    const { data: jobRow2, error: error2 } = await supabase
+      .from("collection_jobs")
+      .insert({
+        user_id: userId,
+        site_id: "11st",
+        search_url: searchUrl,
+        status: "completed",
+        total_target: inputData.products.length,
+        total_collected: inputData.products.length,
+        options,
+      })
+      .select("id")
+      .single();
+
+    if (error2 || !jobRow2?.id) return null;
+    return jobRow2.id as string;
+  }
+
+  const jobId = await createJob();
+  if (!jobId) {
+    return { success: false, error: "수집 그룹 생성에 실패했습니다. 잠시 후 다시 시도해주세요." };
+  }
+
+  const rows = inputData.products.map((p) => ({
+    user_id: userId,
+    job_id: jobId,
     site_id: "11st",
     external_id: p.productCode,
     title_origin: p.productName,
@@ -177,7 +232,7 @@ export async function collect11stProducts(
     status: "collected",
   }));
 
-  const { data, error } = await supabase
+  const { data: rawRows, error } = await supabase
     .from("raw_products")
     .upsert(rows, { onConflict: "user_id,site_id,external_id" })
     .select("id");
@@ -188,11 +243,11 @@ export async function collect11stProducts(
 
   // Auto-convert to products table (if enabled)
   if (settings.autoConvert) {
-    const rawIds = (data ?? []).map((r) => r.id);
-    await autoConvertRawToProducts(supabase, user.id, rawIds, settings.defaultMarginRate);
+    const rawIds = (rawRows ?? []).map((r) => r.id);
+    await autoConvertRawToProducts(supabase, userId, rawIds, settings.defaultMarginRate);
   }
 
-  return { success: true, insertedCount: data?.length ?? 0 };
+  return { success: true, insertedCount: rawRows?.length ?? 0 };
 }
 
 // ── Bulk Collect (Auto-Pagination) ──
@@ -201,6 +256,7 @@ const bulkCollectSchema = z.object({
   keyword: z.string().min(1),
   totalTarget: z.number().int().min(1).max(10000).default(100),
   sortCd: z.enum(["CP", "A", "G", "I", "L", "R"]).default("CP"),
+  groupName: z.string().trim().max(80).optional(),
 });
 
 interface BulkCollectResult {
@@ -230,20 +286,73 @@ export async function bulkCollect11stProducts(
     return { success: false, error: "로그인이 필요합니다" };
   }
 
+  const inputData = parsed.data;
+  const userId = user.id;
+
   // Load user sourcing settings
-  const settings = await loadSourcingSettings(supabase, user.id);
+  const settings = await loadSourcingSettings(supabase, userId);
   // 11st Open API pageSize is practically capped; clamp to avoid bad requests.
   const pageSize = Math.min(settings.pageSize, 50);
-  const effectiveTarget = Math.min(parsed.data.totalTarget, settings.bulkMaxTarget);
+  const effectiveTarget = Math.min(inputData.totalTarget, settings.bulkMaxTarget);
   let totalCollected = 0;
   let currentPage = 1;
   const maxPages = Math.ceil(effectiveTarget / pageSize);
 
+  async function createBulkJob() {
+    const displayName = inputData.groupName?.trim()
+      || `11ST 키워드: ${inputData.keyword}`.slice(0, 80);
+    const searchUrl = `keyword:${inputData.keyword}`;
+    const options = { displayName, keyword: inputData.keyword, sortCd: inputData.sortCd, source: "bulk_collect" };
+
+    const { data: jobRow, error } = await supabase
+      .from("collection_jobs")
+      .insert({
+        user_id: userId,
+        site_id: "11st",
+        search_url: searchUrl,
+        display_name: displayName,
+        status: "processing",
+        total_target: effectiveTarget,
+        total_collected: 0,
+        options,
+      })
+      .select("id")
+      .single();
+
+    if (!error && jobRow?.id) return jobRow.id as string;
+
+    const msg = (error?.message ?? "").toLowerCase();
+    const isMissingDisplayName = msg.includes("display_name") && msg.includes("does not exist");
+    if (!isMissingDisplayName) return null;
+
+    const { data: jobRow2, error: error2 } = await supabase
+      .from("collection_jobs")
+      .insert({
+        user_id: userId,
+        site_id: "11st",
+        search_url: searchUrl,
+        status: "processing",
+        total_target: effectiveTarget,
+        total_collected: 0,
+        options,
+      })
+      .select("id")
+      .single();
+
+    if (error2 || !jobRow2?.id) return null;
+    return jobRow2.id as string;
+  }
+
+  const jobId = await createBulkJob();
+  if (!jobId) {
+    return { success: false, error: "대량 수집 그룹 생성에 실패했습니다. 잠시 후 다시 시도해주세요." };
+  }
+
   while (totalCollected < effectiveTarget && currentPage <= maxPages) {
-    const result = await searchProducts(parsed.data.keyword, {
+    const result = await searchProducts(inputData.keyword, {
       pageNum: currentPage,
       pageSize,
-      sortCd: parsed.data.sortCd,
+      sortCd: inputData.sortCd,
     });
 
     if (!result.products || result.products.length === 0) break;
@@ -252,7 +361,8 @@ export async function bulkCollect11stProducts(
     const productsToCollect = result.products.slice(0, remaining);
 
     const rows = productsToCollect.map((p) => ({
-      user_id: user.id,
+      user_id: userId,
+      job_id: jobId,
       site_id: "11st",
       external_id: p.productCode,
       title_origin: p.productName,
@@ -273,7 +383,7 @@ export async function bulkCollect11stProducts(
       status: "collected",
     }));
 
-    const { data, error } = await supabase
+    const { data: rawRows, error } = await supabase
       .from("raw_products")
       .upsert(rows, { onConflict: "user_id,site_id,external_id" })
       .select("id");
@@ -289,11 +399,19 @@ export async function bulkCollect11stProducts(
 
     // Auto-convert to products table (if enabled)
     if (settings.autoConvert) {
-      const rawIds = (data ?? []).map((r) => r.id);
-      await autoConvertRawToProducts(supabase, user.id, rawIds, settings.defaultMarginRate);
+      const rawIds = (rawRows ?? []).map((r) => r.id);
+      await autoConvertRawToProducts(supabase, userId, rawIds, settings.defaultMarginRate);
     }
 
-    totalCollected += data?.length ?? 0;
+    totalCollected += rawRows?.length ?? 0;
+    await supabase
+      .from("collection_jobs")
+      .update({
+        total_collected: totalCollected,
+        status: totalCollected >= effectiveTarget ? "completed" : "processing",
+      })
+      .eq("id", jobId)
+      .eq("user_id", userId);
     currentPage++;
 
     // Rate limit between pages (user-configured delay)
@@ -322,6 +440,7 @@ async function autoConvertRawToProducts(
   interface RawProductDbRow {
     id: string;
     external_id: string | null;
+    job_id: string | null;
     title_origin: string | null;
     price_origin: number | string | null;
     currency: string | null;
@@ -355,6 +474,22 @@ async function autoConvertRawToProducts(
 
   if (newRawProducts.length === 0) return 0;
 
+  const jobIds = Array.from(new Set(newRawProducts.map((rp) => rp.job_id).filter((v): v is string => Boolean(v))));
+  const jobPolicyById = new Map<string, string | null>();
+  if (jobIds.length > 0) {
+    const { data: jobRows } = await supabase
+      .from("collection_jobs")
+      .select("id, options")
+      .eq("user_id", userId)
+      .in("id", jobIds);
+
+    for (const row of (jobRows ?? []) as Array<{ id: string; options: unknown }>) {
+      const options = (row.options ?? {}) as Record<string, unknown>;
+      const policyId = typeof options.policyId === "string" ? options.policyId : null;
+      jobPolicyById.set(row.id, policyId);
+    }
+  }
+
   const productRows = newRawProducts.map((rp) => {
     const images = Array.isArray(rp.images_json) ? rp.images_json : [];
     const rawData = (rp.raw_data ?? {}) as Record<string, unknown>;
@@ -386,6 +521,7 @@ async function autoConvertRawToProducts(
       stock_quantity: 999,
       is_translated: false,
       is_deleted: false,
+      policy_id: rp.job_id ? (jobPolicyById.get(rp.job_id) ?? null) : null,
     };
   });
 

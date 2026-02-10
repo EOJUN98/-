@@ -112,6 +112,61 @@ export async function updateCollectionJobDisplayNameAction(input: z.infer<typeof
   return { success: true as const };
 }
 
+// ── Update Collection Job Policy (stored in options) ──
+
+const updateJobPolicySchema = z.object({
+  jobId: z.string().uuid("올바른 작업 ID가 아닙니다"),
+  policyId: z.string().uuid("올바른 정책 ID가 아닙니다").nullable(),
+});
+
+export async function updateCollectionJobPolicyAction(input: z.infer<typeof updateJobPolicySchema>) {
+  const parsed = updateJobPolicySchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false as const, error: parsed.error.errors.map((e) => e.message).join(", ") };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { success: false as const, error: "로그인이 필요합니다" };
+
+  if (parsed.data.policyId) {
+    const { data: policyRow, error: policyError } = await supabase
+      .from("product_policies")
+      .select("id")
+      .eq("id", parsed.data.policyId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (policyError) return { success: false as const, error: policyError.message };
+    if (!policyRow) return { success: false as const, error: "정책을 찾을 수 없습니다" };
+  }
+
+  const { data: jobRow, error: jobError } = await supabase
+    .from("collection_jobs")
+    .select("options")
+    .eq("id", parsed.data.jobId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (jobError) return { success: false as const, error: jobError.message };
+  if (!jobRow) return { success: false as const, error: "작업을 찾을 수 없습니다" };
+
+  const prevOptions = (jobRow.options ?? {}) as Record<string, unknown>;
+  const nextOptions = { ...prevOptions, policyId: parsed.data.policyId };
+
+  const { error: updateError } = await supabase
+    .from("collection_jobs")
+    .update({ options: nextOptions })
+    .eq("id", parsed.data.jobId)
+    .eq("user_id", user.id);
+
+  if (updateError) return { success: false as const, error: updateError.message };
+  return { success: true as const };
+}
+
 // ── Create Collection Job ──
 export async function createCollectionJob(
   input: CreateJobInput

@@ -81,6 +81,7 @@ interface CrawlStatus {
 export function EleventhStreetSearch() {
   const [siteId, setSiteId] = useState<SiteId>("11st");
   const [displayName, setDisplayName] = useState("");
+  const [groupName, setGroupName] = useState("");
   const [keyword, setKeyword] = useState("");
   const [searchUrl, setSearchUrl] = useState("");
   const [totalTarget, setTotalTarget] = useState(100);
@@ -155,11 +156,13 @@ export function EleventhStreetSearch() {
           keyword: keyword.trim(),
           totalTarget: bulkTarget,
           sortType: sortCd as "recm" | "date" | "lowp" | "highp" | "popr",
+          groupName: groupName.trim() ? groupName.trim() : undefined,
         })
       : await bulkCollect11stProducts({
           keyword: keyword.trim(),
           totalTarget: bulkTarget,
           sortCd: sortCd as "CP" | "A" | "G" | "I" | "L" | "R",
+          groupName: groupName.trim() ? groupName.trim() : undefined,
         });
 
     setBulkCollecting(false);
@@ -228,8 +231,14 @@ export function EleventhStreetSearch() {
 
     setCollecting(true);
     const result = siteId === "gmarket"
-      ? await collectGmarketProducts({ products: selectedProducts as GmarketProduct[] })
-      : await collect11stProducts({ products: selectedProducts as EleventhStreetProduct[] });
+      ? await collectGmarketProducts({
+          products: selectedProducts as GmarketProduct[],
+          groupName: groupName.trim() ? groupName.trim() : undefined,
+        })
+      : await collect11stProducts({
+          products: selectedProducts as EleventhStreetProduct[],
+          groupName: groupName.trim() ? groupName.trim() : undefined,
+        });
     setCollecting(false);
 
     if (!result.success) {
@@ -256,8 +265,14 @@ export function EleventhStreetSearch() {
     const selectedProducts = products.filter((p) => selected.has(p.productCode));
     setCollecting(true);
     const collectResult = siteId === "gmarket"
-      ? await collectGmarketProducts({ products: selectedProducts as GmarketProduct[] })
-      : await collect11stProducts({ products: selectedProducts as EleventhStreetProduct[] });
+      ? await collectGmarketProducts({
+          products: selectedProducts as GmarketProduct[],
+          groupName: groupName.trim() ? groupName.trim() : undefined,
+        })
+      : await collect11stProducts({
+          products: selectedProducts as EleventhStreetProduct[],
+          groupName: groupName.trim() ? groupName.trim() : undefined,
+        });
     setCollecting(false);
 
     if (!collectResult.success) {
@@ -371,13 +386,13 @@ export function EleventhStreetSearch() {
           </Select>
         </div>
 
-        {/* 11st: Keyword Search */}
-        {isKeywordSite && (
-          <>
-            <form
-              onSubmit={(e) => { e.preventDefault(); handleSearch(); }}
-              className="flex gap-3 items-end"
-            >
+	        {/* 11st: Keyword Search */}
+	        {isKeywordSite && (
+	          <>
+	            <form
+	              onSubmit={(e) => { e.preventDefault(); handleSearch(); }}
+	              className="flex gap-3 items-end"
+	            >
               <div className="flex-1 space-y-2">
                 <Label htmlFor="keyword">검색어</Label>
                 <Input
@@ -403,16 +418,30 @@ export function EleventhStreetSearch() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button type="submit" disabled={loading || bulkCollecting} className="gap-2">
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                검색
-              </Button>
-            </form>
+	              <Button type="submit" disabled={loading || bulkCollecting} className="gap-2">
+	                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+	                검색
+	              </Button>
+	            </form>
 
-            {/* Bulk Collect */}
-            <div className="flex gap-3 items-end rounded-lg border border-dashed p-3">
-              <div className="w-[140px] space-y-2">
-                <Label htmlFor="bulkTarget">대량 수집 목표</Label>
+	            <div className="space-y-2">
+	              <Label htmlFor="groupName">검색필터명 (선택)</Label>
+	              <Input
+	                id="groupName"
+	                placeholder="예: 11번가 영어 참고서 (2월)"
+	                value={groupName}
+	                onChange={(e) => setGroupName(e.target.value)}
+	                maxLength={80}
+	              />
+	              <p className="text-xs text-muted-foreground">
+	                비워두면 자동으로 그룹명이 생성됩니다.
+	              </p>
+	            </div>
+
+	            {/* Bulk Collect */}
+	            <div className="flex gap-3 items-end rounded-lg border border-dashed p-3">
+	              <div className="w-[140px] space-y-2">
+	                <Label htmlFor="bulkTarget">대량 수집 목표</Label>
                 <Input
                   id="bulkTarget"
                   type="number"

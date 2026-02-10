@@ -320,6 +320,40 @@ export async function updateOrderOverseasAndMemoAction(input: z.infer<typeof upd
   return { success: true as const };
 }
 
+// ── Internal memo auto-save ──
+
+const updateOrderMemoSchema = z.object({
+  orderId: z.string().uuid(),
+  memo: z.string().trim().max(5000).nullable(),
+});
+
+export async function updateOrderMemoAction(input: z.infer<typeof updateOrderMemoSchema>) {
+  const parsed = updateOrderMemoSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false as const, error: parsed.error.issues.map((i) => i.message).join(", ") };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false as const, error: "로그인이 필요합니다" };
+
+  const nextMemo = parsed.data.memo ? parsed.data.memo.trim() : null;
+
+  const { error } = await supabase
+    .from("orders")
+    .update({
+      internal_memo: nextMemo,
+      memo_updated_at: new Date().toISOString(),
+    })
+    .eq("id", parsed.data.orderId)
+    .eq("user_id", user.id);
+
+  if (error) return { success: false as const, error: error.message };
+
+  revalidatePath("/orders");
+  return { success: true as const, memoUpdatedAt: new Date().toISOString() };
+}
+
 // ── 수동 주문 동기화 트리거 ──
 
 export async function triggerOrderSyncAction() {

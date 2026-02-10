@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { getOrderDetailAction, updateOrderOverseasAndMemoAction } from "@/actions/orders";
+import { getOrderDetailAction, updateOrderMemoAction, updateOrderOverseasAndMemoAction } from "@/actions/orders";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -62,11 +62,14 @@ export function OrderDetailDialog({ orderId, onClose }: OrderDetailDialogProps) 
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [memoSaving, setMemoSaving] = useState(false);
+  const [memoStatus, setMemoStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [memoDraft, setMemoDraft] = useState("");
+  const [memoServerValue, setMemoServerValue] = useState("");
   const [draft, setDraft] = useState({
     overseasOrderNumber: "",
     overseasTrackingNumber: "",
     forwarderId: "",
-    internalMemo: "",
   });
   const { toast } = useToast();
 
@@ -91,8 +94,12 @@ export function OrderDetailDialog({ orderId, onClose }: OrderDetailDialogProps) 
       overseasOrderNumber: order.overseasOrderNumber ?? "",
       overseasTrackingNumber: order.overseasTrackingNumber ?? "",
       forwarderId: order.forwarderId ?? "",
-      internalMemo: order.internalMemo ?? "",
     });
+
+    const memo = order.internalMemo ?? "";
+    setMemoDraft(memo);
+    setMemoServerValue(memo);
+    setMemoStatus("idle");
   }, [order]);
 
   async function handleSaveOverseasAndMemo() {
@@ -103,7 +110,6 @@ export function OrderDetailDialog({ orderId, onClose }: OrderDetailDialogProps) 
       overseasOrderNumber: draft.overseasOrderNumber,
       overseasTrackingNumber: draft.overseasTrackingNumber,
       forwarderId: draft.forwarderId,
-      internalMemo: draft.internalMemo,
     });
     setSaving(false);
 
@@ -117,12 +123,46 @@ export function OrderDetailDialog({ orderId, onClose }: OrderDetailDialogProps) 
       overseasOrderNumber: draft.overseasOrderNumber.trim() || null,
       overseasTrackingNumber: draft.overseasTrackingNumber.trim() || null,
       forwarderId: draft.forwarderId.trim() || null,
-      internalMemo: draft.internalMemo.trim() || null,
-      memoUpdatedAt: new Date().toISOString(),
     }) : prev);
 
     toast({ title: "저장 완료" });
   }
+
+  useEffect(() => {
+    if (!order) return;
+
+    const nextTrimmed = memoDraft.trim();
+    const serverTrimmed = memoServerValue.trim();
+    if (nextTrimmed === serverTrimmed) {
+      if (memoStatus === "saving") setMemoStatus("idle");
+      return;
+    }
+
+    setMemoStatus("saving");
+    const timeout = window.setTimeout(async () => {
+      setMemoSaving(true);
+      const res = await updateOrderMemoAction({
+        orderId: order.id,
+        memo: nextTrimmed ? nextTrimmed : null,
+      });
+      setMemoSaving(false);
+
+      if (!res.success) {
+        setMemoStatus("error");
+        return;
+      }
+
+      setMemoServerValue(nextTrimmed);
+      setMemoStatus("saved");
+      setOrder((prev) => prev ? ({
+        ...prev,
+        internalMemo: nextTrimmed ? nextTrimmed : null,
+        memoUpdatedAt: res.memoUpdatedAt ?? new Date().toISOString(),
+      }) : prev);
+    }, 500);
+
+    return () => window.clearTimeout(timeout);
+  }, [memoDraft, memoServerValue, memoStatus, order]);
 
   return (
     <Dialog open={Boolean(orderId)} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -208,7 +248,7 @@ export function OrderDetailDialog({ orderId, onClose }: OrderDetailDialogProps) 
               </div>
             </div>
 
-            {/* 해외주문/트래킹 + 메모 */}
+            {/* 해외주문/트래킹 */}
             <div className="rounded-lg border p-3 space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <p className="font-medium text-sm">해외주문/해외트래킹</p>
@@ -245,20 +285,34 @@ export function OrderDetailDialog({ orderId, onClose }: OrderDetailDialogProps) 
                     placeholder="예: easy / panda / ..."
                   />
                 </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="internal-memo">내부 메모</Label>
-                  <textarea
-                    id="internal-memo"
-                    value={draft.internalMemo}
-                    onChange={(e) => setDraft((p) => ({ ...p, internalMemo: e.target.value }))}
-                    className="min-h-[96px] w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    placeholder="운영 메모(예: 품절/옵션변경/추가 안내 등)"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    마지막 저장: {order.memoUpdatedAt ? formatDate(order.memoUpdatedAt) : "-"}
-                  </p>
+              </div>
+            </div>
+
+            {/* 내부 메모 (자동저장) */}
+            <div className="rounded-lg border p-3 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-medium text-sm">내부 메모 (자동저장)</p>
+                <div className="text-xs text-muted-foreground">
+                  {memoSaving || memoStatus === "saving"
+                    ? "저장 중..."
+                    : memoStatus === "saved"
+                      ? "저장됨"
+                      : memoStatus === "error"
+                        ? "저장 실패"
+                        : "대기"}
                 </div>
               </div>
+              <Label htmlFor="internal-memo">메모</Label>
+              <textarea
+                id="internal-memo"
+                value={memoDraft}
+                onChange={(e) => setMemoDraft(e.target.value)}
+                className="min-h-[96px] w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                placeholder="운영 메모(예: 품절/옵션변경/추가 안내 등)"
+              />
+              <p className="text-xs text-muted-foreground">
+                마지막 저장: {order.memoUpdatedAt ? formatDate(order.memoUpdatedAt) : "-"} · 500ms 디바운스
+              </p>
             </div>
 
             {/* 주문 아이템 */}

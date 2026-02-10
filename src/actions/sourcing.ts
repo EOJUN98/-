@@ -217,6 +217,76 @@ export async function updateCollectionJobCategoryAction(input: z.infer<typeof up
   return { success: true as const };
 }
 
+// ── Update Collection Job Market Category Map (stored in options) ──
+
+const updateJobMarketCategoriesSchema = z.object({
+  jobId: z.string().uuid("올바른 작업 ID가 아닙니다"),
+  categories: z.object({
+    smartstore: z.number().int().positive().nullable().optional(),
+    coupang: z.number().int().positive().nullable().optional(),
+    elevenst: z.number().int().positive().nullable().optional(),
+    gmarket: z.number().int().positive().nullable().optional(),
+    auction: z.number().int().positive().nullable().optional(),
+  }),
+});
+
+export type JobMarketCategoriesInput = z.infer<typeof updateJobMarketCategoriesSchema>;
+
+export async function updateCollectionJobMarketCategoriesAction(input: JobMarketCategoriesInput) {
+  const parsed = updateJobMarketCategoriesSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false as const, error: parsed.error.errors.map((e) => e.message).join(", ") };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { success: false as const, error: "로그인이 필요합니다" };
+
+  const { data: jobRow, error: jobError } = await supabase
+    .from("collection_jobs")
+    .select("options")
+    .eq("id", parsed.data.jobId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (jobError) return { success: false as const, error: jobError.message };
+  if (!jobRow) return { success: false as const, error: "작업을 찾을 수 없습니다" };
+
+  const prevOptions = (jobRow.options ?? {}) as Record<string, unknown>;
+  const prevMap = (prevOptions.marketCategoryIds ?? {}) as Record<string, unknown>;
+  const nextMap: Record<string, number | null> = {
+    smartstore: (prevMap.smartstore as number | null) ?? null,
+    coupang: (prevMap.coupang as number | null) ?? null,
+    elevenst: (prevMap.elevenst as number | null) ?? null,
+    gmarket: (prevMap.gmarket as number | null) ?? null,
+    auction: (prevMap.auction as number | null) ?? null,
+  };
+
+  for (const [k, v] of Object.entries(parsed.data.categories)) {
+    if (typeof v === "undefined") continue;
+    nextMap[k] = v;
+  }
+
+  // Backward compatible: keep categoryId as SmartStore category (default publishing target for now).
+  const nextOptions: Record<string, unknown> = {
+    ...prevOptions,
+    marketCategoryIds: nextMap,
+    categoryId: nextMap.smartstore ?? null,
+  };
+
+  const { error: updateError } = await supabase
+    .from("collection_jobs")
+    .update({ options: nextOptions })
+    .eq("id", parsed.data.jobId)
+    .eq("user_id", user.id);
+
+  if (updateError) return { success: false as const, error: updateError.message };
+  return { success: true as const };
+}
+
 // ── Create Collection Job ──
 export async function createCollectionJob(
   input: CreateJobInput

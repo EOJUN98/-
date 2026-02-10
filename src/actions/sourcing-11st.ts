@@ -495,10 +495,13 @@ async function autoConvertRawToProducts(
       const options = (row.options ?? {}) as Record<string, unknown>;
       const policyId = typeof options.policyId === "string" ? options.policyId : null;
       jobPolicyById.set(row.id, policyId);
-      const categoryIdRaw = options.categoryId;
-      const categoryId = typeof categoryIdRaw === "number" && Number.isFinite(categoryIdRaw)
-        ? Math.trunc(categoryIdRaw)
-        : null;
+      // category_id is currently a single INT; treat it as SmartStore leafCategoryId for now.
+      const marketMap = (options.marketCategoryIds ?? {}) as Record<string, unknown>;
+      const categoryIdRaw = marketMap.smartstore ?? options.categoryId;
+      const categoryId =
+        typeof categoryIdRaw === "number" && Number.isFinite(categoryIdRaw)
+          ? Math.trunc(categoryIdRaw)
+          : null;
       jobCategoryById.set(row.id, categoryId);
     }
   }

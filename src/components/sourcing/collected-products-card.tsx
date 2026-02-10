@@ -10,7 +10,7 @@ import {
   convertRawToProductsByJob,
   type RawProductRow,
 } from "@/actions/sourcing-11st";
-import { updateCollectionJobCategoryAction, updateCollectionJobDisplayNameAction, updateCollectionJobPolicyAction } from "@/actions/sourcing";
+import { updateCollectionJobDisplayNameAction, updateCollectionJobMarketCategoriesAction, updateCollectionJobPolicyAction } from "@/actions/sourcing";
 import { fetchPolicySummaryList, type PolicyOption } from "@/actions/policy-apply";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -111,7 +111,13 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
   const [optimisticJobPolicies, setOptimisticJobPolicies] = useState<Record<string, string | null>>({});
   const [optimisticJobCategories, setOptimisticJobCategories] = useState<Record<string, number | null>>({});
   const [categoryOpen, setCategoryOpen] = useState(false);
-  const [categoryDraft, setCategoryDraft] = useState<string>("");
+  const [categoryDraft, setCategoryDraft] = useState<{
+    smartstore: string;
+    coupang: string;
+    elevenst: string;
+    gmarket: string;
+    auction: string;
+  }>({ smartstore: "", coupang: "", elevenst: "", gmarket: "", auction: "" });
   const [policyOptions, setPolicyOptions] = useState<PolicyOption[]>([]);
   const [policyLoading, setPolicyLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -346,18 +352,30 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
       return optimisticJobCategories[selectedJob.id] ?? null;
     }
     const options = (selectedJob.options ?? {}) as Record<string, unknown>;
-    const value = options.categoryId;
+    const marketMap = (options.marketCategoryIds ?? {}) as Record<string, unknown>;
+    const value = marketMap.smartstore ?? options.categoryId;
     if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
     return null;
   }, [optimisticJobCategories, selectedJob]);
 
   useEffect(() => {
     if (!selectedJob) {
-      setCategoryDraft("");
+      setCategoryDraft({ smartstore: "", coupang: "", elevenst: "", gmarket: "", auction: "" });
       setCategoryOpen(false);
       return;
     }
-    setCategoryDraft(selectedJobCategoryId ? String(selectedJobCategoryId) : "");
+    const options = (selectedJob.options ?? {}) as Record<string, unknown>;
+    const marketMap = (options.marketCategoryIds ?? {}) as Record<string, unknown>;
+    function toStr(v: unknown) {
+      return typeof v === "number" && Number.isFinite(v) ? String(Math.trunc(v)) : "";
+    }
+    setCategoryDraft({
+      smartstore: toStr(marketMap.smartstore ?? selectedJobCategoryId),
+      coupang: toStr(marketMap.coupang),
+      elevenst: toStr(marketMap.elevenst),
+      gmarket: toStr(marketMap.gmarket),
+      auction: toStr(marketMap.auction),
+    });
   }, [selectedJob, selectedJobCategoryId]);
 
   return (
@@ -482,7 +500,20 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
                 open={categoryOpen}
                 onOpenChange={(open) => {
                   setCategoryOpen(open);
-                  if (open) setCategoryDraft(selectedJobCategoryId ? String(selectedJobCategoryId) : "");
+                  if (open) {
+                    const options = (selectedJob.options ?? {}) as Record<string, unknown>;
+                    const marketMap = (options.marketCategoryIds ?? {}) as Record<string, unknown>;
+                    function toStr(v: unknown) {
+                      return typeof v === "number" && Number.isFinite(v) ? String(Math.trunc(v)) : "";
+                    }
+                    setCategoryDraft({
+                      smartstore: toStr(marketMap.smartstore ?? selectedJobCategoryId),
+                      coupang: toStr(marketMap.coupang),
+                      elevenst: toStr(marketMap.elevenst),
+                      gmarket: toStr(marketMap.gmarket),
+                      auction: toStr(marketMap.auction),
+                    });
+                  }
                 }}
               >
                 <DialogTrigger asChild>
@@ -492,20 +523,64 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
                 </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
-                    <DialogTitle>카테고리 ID 설정</DialogTitle>
+                    <DialogTitle>마켓별 카테고리 ID 설정</DialogTitle>
                     <DialogDescription>
-                      이 그룹에서 변환되는 상품의 `category_id`(마켓 카테고리 ID)를 지정합니다.
+                      이 그룹에서 변환되는 상품에 사용할 마켓별 카테고리 ID를 지정합니다. (현재 `products.category_id`는 스마트스토어 기준으로 반영됩니다.)
                     </DialogDescription>
                   </DialogHeader>
-                  <div className="space-y-2">
-                    <Label htmlFor="categoryId">카테고리 ID (숫자)</Label>
-                    <Input
-                      id="categoryId"
-                      inputMode="numeric"
-                      placeholder="예: 50000000"
-                      value={categoryDraft}
-                      onChange={(e) => setCategoryDraft(e.target.value)}
-                    />
+                  <div className="space-y-3">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="cat-smartstore">스마트스토어</Label>
+                        <Input
+                          id="cat-smartstore"
+                          inputMode="numeric"
+                          placeholder="leafCategoryId"
+                          value={categoryDraft.smartstore}
+                          onChange={(e) => setCategoryDraft((p) => ({ ...p, smartstore: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="cat-coupang">쿠팡</Label>
+                        <Input
+                          id="cat-coupang"
+                          inputMode="numeric"
+                          placeholder="displayCategoryCode"
+                          value={categoryDraft.coupang}
+                          onChange={(e) => setCategoryDraft((p) => ({ ...p, coupang: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="cat-11st">11번가</Label>
+                        <Input
+                          id="cat-11st"
+                          inputMode="numeric"
+                          placeholder="categoryId"
+                          value={categoryDraft.elevenst}
+                          onChange={(e) => setCategoryDraft((p) => ({ ...p, elevenst: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="cat-gmarket">G마켓</Label>
+                        <Input
+                          id="cat-gmarket"
+                          inputMode="numeric"
+                          placeholder="categoryId"
+                          value={categoryDraft.gmarket}
+                          onChange={(e) => setCategoryDraft((p) => ({ ...p, gmarket: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-2 sm:col-span-2">
+                        <Label htmlFor="cat-auction">옥션</Label>
+                        <Input
+                          id="cat-auction"
+                          inputMode="numeric"
+                          placeholder="categoryId"
+                          value={categoryDraft.auction}
+                          onChange={(e) => setCategoryDraft((p) => ({ ...p, auction: e.target.value }))}
+                        />
+                      </div>
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       비워두면 미지정(null)로 저장됩니다.
                     </p>
@@ -513,30 +588,41 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
                   <DialogFooter>
                     <Button
                       onClick={() => {
-                        const trimmed = categoryDraft.trim();
-                        const categoryId = trimmed ? Number(trimmed) : null;
-                        if (trimmed) {
-                          const n = Number(trimmed);
-                          if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
-                            toast({ title: "카테고리 ID는 양의 정수여야 합니다", variant: "destructive" });
+                        const keys: Array<keyof typeof categoryDraft> = ["smartstore", "coupang", "elevenst", "gmarket", "auction"];
+                        function parse(v: string) {
+                          const t = v.trim();
+                          if (!t) return null;
+                          const n = Number(t);
+                          if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) return undefined;
+                          return n;
+                        }
+
+                        const parsedMap: Record<string, number | null> = {};
+                        for (const k of keys) {
+                          const parsed = parse(categoryDraft[k]);
+                          if (typeof parsed === "undefined") {
+                            toast({ title: `카테고리 ID는 양의 정수여야 합니다 (${k})`, variant: "destructive" });
                             return;
                           }
+                          parsedMap[k] = parsed;
                         }
-                        if (trimmed && categoryId === null) {
-                          toast({ title: "카테고리 ID는 양의 정수여야 합니다", variant: "destructive" });
-                          return;
-                        }
+
                         startTransition(async () => {
-                          const res = await updateCollectionJobCategoryAction({
+                          const res = await updateCollectionJobMarketCategoriesAction({
                             jobId: selectedJob.id,
-                            categoryId,
-                            categoryLabel: null,
+                            categories: {
+                              smartstore: parsedMap.smartstore,
+                              coupang: parsedMap.coupang,
+                              elevenst: parsedMap.elevenst,
+                              gmarket: parsedMap.gmarket,
+                              auction: parsedMap.auction,
+                            },
                           });
                           if (!res.success) {
                             toast({ title: "저장 실패", description: res.error, variant: "destructive" });
                             return;
                           }
-                          setOptimisticJobCategories((prev) => ({ ...prev, [selectedJob.id]: categoryId }));
+                          setOptimisticJobCategories((prev) => ({ ...prev, [selectedJob.id]: parsedMap.smartstore }));
                           toast({ title: "그룹 카테고리가 저장되었습니다" });
                           setCategoryOpen(false);
                         });

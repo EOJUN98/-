@@ -286,8 +286,18 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
               수집된 상품 목록
             </CardTitle>
             <CardDescription>
-              총 {totalCount.toLocaleString()}개 수집됨
+              총 {totalCount.toLocaleString()}개 표시중
             </CardDescription>
+            {selectedJobName && (
+              <div className="mt-2 flex items-center gap-2 flex-wrap">
+                <Badge variant="secondary" className="max-w-[520px] truncate">
+                  선택 그룹: {selectedJobName}
+                </Badge>
+                <span className="text-xs text-muted-foreground">
+                  그룹 기준 요약은 아래에 표시됩니다
+                </span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Select

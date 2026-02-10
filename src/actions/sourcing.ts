@@ -167,6 +167,56 @@ export async function updateCollectionJobPolicyAction(input: z.infer<typeof upda
   return { success: true as const };
 }
 
+// ── Update Collection Job Category (stored in options) ──
+
+const updateJobCategorySchema = z.object({
+  jobId: z.string().uuid("올바른 작업 ID가 아닙니다"),
+  categoryId: z.number().int().positive("카테고리 ID는 양의 정수여야 합니다").nullable(),
+  categoryLabel: z.string().trim().max(120).nullable().optional(),
+});
+
+export async function updateCollectionJobCategoryAction(input: z.infer<typeof updateJobCategorySchema>) {
+  const parsed = updateJobCategorySchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false as const, error: parsed.error.errors.map((e) => e.message).join(", ") };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { success: false as const, error: "로그인이 필요합니다" };
+
+  const { data: jobRow, error: jobError } = await supabase
+    .from("collection_jobs")
+    .select("options")
+    .eq("id", parsed.data.jobId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (jobError) return { success: false as const, error: jobError.message };
+  if (!jobRow) return { success: false as const, error: "작업을 찾을 수 없습니다" };
+
+  const prevOptions = (jobRow.options ?? {}) as Record<string, unknown>;
+  const nextOptions: Record<string, unknown> = {
+    ...prevOptions,
+    categoryId: parsed.data.categoryId,
+  };
+  if (typeof parsed.data.categoryLabel === "string") {
+    nextOptions.categoryLabel = parsed.data.categoryLabel;
+  }
+
+  const { error: updateError } = await supabase
+    .from("collection_jobs")
+    .update({ options: nextOptions })
+    .eq("id", parsed.data.jobId)
+    .eq("user_id", user.id);
+
+  if (updateError) return { success: false as const, error: updateError.message };
+  return { success: true as const };
+}
+
 // ── Create Collection Job ──
 export async function createCollectionJob(
   input: CreateJobInput

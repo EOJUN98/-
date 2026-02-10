@@ -483,6 +483,7 @@ async function autoConvertRawToProducts(
 
   const jobIds = Array.from(new Set(newRawProducts.map((rp) => rp.job_id).filter((v): v is string => Boolean(v))));
   const jobPolicyById = new Map<string, string | null>();
+  const jobCategoryById = new Map<string, number | null>();
   if (jobIds.length > 0) {
     const { data: jobRows } = await supabase
       .from("collection_jobs")
@@ -494,6 +495,11 @@ async function autoConvertRawToProducts(
       const options = (row.options ?? {}) as Record<string, unknown>;
       const policyId = typeof options.policyId === "string" ? options.policyId : null;
       jobPolicyById.set(row.id, policyId);
+      const categoryIdRaw = options.categoryId;
+      const categoryId = typeof categoryIdRaw === "number" && Number.isFinite(categoryIdRaw)
+        ? Math.trunc(categoryIdRaw)
+        : null;
+      jobCategoryById.set(row.id, categoryId);
     }
   }
 
@@ -529,6 +535,7 @@ async function autoConvertRawToProducts(
       is_translated: false,
       is_deleted: false,
       policy_id: rp.job_id ? (jobPolicyById.get(rp.job_id) ?? null) : null,
+      category_id: rp.job_id ? (jobCategoryById.get(rp.job_id) ?? null) : null,
     };
   });
 

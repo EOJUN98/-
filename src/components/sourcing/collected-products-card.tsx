@@ -10,13 +10,14 @@ import {
   convertRawToProductsByJob,
   type RawProductRow,
 } from "@/actions/sourcing-11st";
-import { updateCollectionJobDisplayNameAction, updateCollectionJobPolicyAction } from "@/actions/sourcing";
+import { updateCollectionJobCategoryAction, updateCollectionJobDisplayNameAction, updateCollectionJobPolicyAction } from "@/actions/sourcing";
 import { fetchPolicySummaryList, type PolicyOption } from "@/actions/policy-apply";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -108,6 +109,9 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
   const [editName, setEditName] = useState("");
   const [optimisticJobNames, setOptimisticJobNames] = useState<Record<string, string>>({});
   const [optimisticJobPolicies, setOptimisticJobPolicies] = useState<Record<string, string | null>>({});
+  const [optimisticJobCategories, setOptimisticJobCategories] = useState<Record<string, number | null>>({});
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [categoryDraft, setCategoryDraft] = useState<string>("");
   const [policyOptions, setPolicyOptions] = useState<PolicyOption[]>([]);
   const [policyLoading, setPolicyLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -336,6 +340,26 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
     return typeof options.policyId === "string" ? options.policyId : null;
   }, [optimisticJobPolicies, selectedJob]);
 
+  const selectedJobCategoryId = useMemo(() => {
+    if (!selectedJob) return null;
+    if (Object.prototype.hasOwnProperty.call(optimisticJobCategories, selectedJob.id)) {
+      return optimisticJobCategories[selectedJob.id] ?? null;
+    }
+    const options = (selectedJob.options ?? {}) as Record<string, unknown>;
+    const value = options.categoryId;
+    if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
+    return null;
+  }, [optimisticJobCategories, selectedJob]);
+
+  useEffect(() => {
+    if (!selectedJob) {
+      setCategoryDraft("");
+      setCategoryOpen(false);
+      return;
+    }
+    setCategoryDraft(selectedJobCategoryId ? String(selectedJobCategoryId) : "");
+  }, [selectedJob, selectedJobCategoryId]);
+
   return (
     <Card>
       <CardHeader>
@@ -443,6 +467,78 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
                           setOptimisticJobNames((prev) => ({ ...prev, [selectedJob.id]: next }));
                           toast({ title: "그룹명이 수정되었습니다" });
                           setEditOpen(false);
+                        });
+                      }}
+                      disabled={isPending}
+                    >
+                      {isPending ? "저장 중..." : "저장"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            )}
+            {selectedJob && (
+              <Dialog
+                open={categoryOpen}
+                onOpenChange={(open) => {
+                  setCategoryOpen(open);
+                  if (open) setCategoryDraft(selectedJobCategoryId ? String(selectedJobCategoryId) : "");
+                }}
+              >
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    카테고리 설정
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>카테고리 ID 설정</DialogTitle>
+                    <DialogDescription>
+                      이 그룹에서 변환되는 상품의 `category_id`(마켓 카테고리 ID)를 지정합니다.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-2">
+                    <Label htmlFor="categoryId">카테고리 ID (숫자)</Label>
+                    <Input
+                      id="categoryId"
+                      inputMode="numeric"
+                      placeholder="예: 50000000"
+                      value={categoryDraft}
+                      onChange={(e) => setCategoryDraft(e.target.value)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      비워두면 미지정(null)로 저장됩니다.
+                    </p>
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      onClick={() => {
+                        const trimmed = categoryDraft.trim();
+                        const categoryId = trimmed ? Number(trimmed) : null;
+                        if (trimmed) {
+                          const n = Number(trimmed);
+                          if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+                            toast({ title: "카테고리 ID는 양의 정수여야 합니다", variant: "destructive" });
+                            return;
+                          }
+                        }
+                        if (trimmed && categoryId === null) {
+                          toast({ title: "카테고리 ID는 양의 정수여야 합니다", variant: "destructive" });
+                          return;
+                        }
+                        startTransition(async () => {
+                          const res = await updateCollectionJobCategoryAction({
+                            jobId: selectedJob.id,
+                            categoryId,
+                            categoryLabel: null,
+                          });
+                          if (!res.success) {
+                            toast({ title: "저장 실패", description: res.error, variant: "destructive" });
+                            return;
+                          }
+                          setOptimisticJobCategories((prev) => ({ ...prev, [selectedJob.id]: categoryId }));
+                          toast({ title: "그룹 카테고리가 저장되었습니다" });
+                          setCategoryOpen(false);
                         });
                       }}
                       disabled={isPending}

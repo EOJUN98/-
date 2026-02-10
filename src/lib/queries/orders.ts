@@ -9,6 +9,11 @@ interface OrderRow {
   market_config_id: string | null;
   market_status: string | null;
   internal_status: string | null;
+  overseas_order_number: string | null;
+  overseas_tracking_number: string | null;
+  forwarder_id: string | null;
+  internal_memo: string | null;
+  memo_updated_at: string | null;
   buyer_name: string | null;
   buyer_phone: string | null;
   shipping_address: string | null;
@@ -44,7 +49,7 @@ export async function getOrdersForDashboard(limit = 300) {
   const { data: rows, error } = await supabase
     .from("orders")
     .select(
-      "id, order_number, market_config_id, market_status, internal_status, buyer_name, buyer_phone, shipping_address, total_price, order_date, tracking_number, courier_code, created_at"
+      "id, order_number, market_config_id, market_status, internal_status, overseas_order_number, overseas_tracking_number, forwarder_id, internal_memo, memo_updated_at, buyer_name, buyer_phone, shipping_address, total_price, order_date, tracking_number, courier_code, created_at"
     )
     .eq("user_id", user.id)
     .order("order_date", { ascending: false, nullsFirst: false })
@@ -79,6 +84,11 @@ export async function getOrdersForDashboard(limit = 300) {
     marketCode: row.market_config_id ? marketCodeByConfigId.get(row.market_config_id) ?? null : null,
     marketStatus: row.market_status,
     internalStatus: row.internal_status ?? "collected",
+    overseasOrderNumber: row.overseas_order_number ?? null,
+    overseasTrackingNumber: row.overseas_tracking_number ?? null,
+    forwarderId: row.forwarder_id ?? null,
+    internalMemo: row.internal_memo ?? null,
+    memoUpdatedAt: row.memo_updated_at ?? null,
     buyerName: row.buyer_name,
     buyerPhone: row.buyer_phone,
     shippingAddress: row.shipping_address,

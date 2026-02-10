@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 
-import { getOrderDetailAction } from "@/actions/orders";
+import { getOrderDetailAction, updateOrderOverseasAndMemoAction } from "@/actions/orders";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -11,6 +12,8 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -19,6 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useToast } from "@/hooks/use-toast";
 import type { OrderDetail } from "@/types/order";
 
 interface OrderDetailDialogProps {
@@ -57,6 +61,14 @@ function formatDate(value: string | null) {
 export function OrderDetailDialog({ orderId, onClose }: OrderDetailDialogProps) {
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState({
+    overseasOrderNumber: "",
+    overseasTrackingNumber: "",
+    forwarderId: "",
+    internalMemo: "",
+  });
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!orderId) {
@@ -72,6 +84,45 @@ export function OrderDetailDialog({ orderId, onClose }: OrderDetailDialogProps) 
       }
     });
   }, [orderId]);
+
+  useEffect(() => {
+    if (!order) return;
+    setDraft({
+      overseasOrderNumber: order.overseasOrderNumber ?? "",
+      overseasTrackingNumber: order.overseasTrackingNumber ?? "",
+      forwarderId: order.forwarderId ?? "",
+      internalMemo: order.internalMemo ?? "",
+    });
+  }, [order]);
+
+  async function handleSaveOverseasAndMemo() {
+    if (!order) return;
+    setSaving(true);
+    const result = await updateOrderOverseasAndMemoAction({
+      orderId: order.id,
+      overseasOrderNumber: draft.overseasOrderNumber,
+      overseasTrackingNumber: draft.overseasTrackingNumber,
+      forwarderId: draft.forwarderId,
+      internalMemo: draft.internalMemo,
+    });
+    setSaving(false);
+
+    if (!result.success) {
+      toast({ title: "저장 실패", description: result.error, variant: "destructive" });
+      return;
+    }
+
+    setOrder((prev) => prev ? ({
+      ...prev,
+      overseasOrderNumber: draft.overseasOrderNumber.trim() || null,
+      overseasTrackingNumber: draft.overseasTrackingNumber.trim() || null,
+      forwarderId: draft.forwarderId.trim() || null,
+      internalMemo: draft.internalMemo.trim() || null,
+      memoUpdatedAt: new Date().toISOString(),
+    }) : prev);
+
+    toast({ title: "저장 완료" });
+  }
 
   return (
     <Dialog open={Boolean(orderId)} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -153,6 +204,59 @@ export function OrderDetailDialog({ orderId, onClose }: OrderDetailDialogProps) 
                 <div>
                   <p className="text-muted-foreground">송장번호</p>
                   <p className="font-medium">{order.trackingNumber ?? "미등록"}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* 해외주문/트래킹 + 메모 */}
+            <div className="rounded-lg border p-3 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-medium text-sm">해외주문/해외트래킹</p>
+                <Button size="sm" onClick={handleSaveOverseasAndMemo} disabled={saving}>
+                  {saving ? "저장 중..." : "저장"}
+                </Button>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="overseas-order-number">해외주문번호</Label>
+                  <Input
+                    id="overseas-order-number"
+                    value={draft.overseasOrderNumber}
+                    onChange={(e) => setDraft((p) => ({ ...p, overseasOrderNumber: e.target.value }))}
+                    placeholder="예: 20260210-12345"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="overseas-tracking-number">해외트래킹번호</Label>
+                  <Input
+                    id="overseas-tracking-number"
+                    value={draft.overseasTrackingNumber}
+                    onChange={(e) => setDraft((p) => ({ ...p, overseasTrackingNumber: e.target.value }))}
+                    placeholder="예: LP123456789CN"
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="forwarder-id">배대지/포워더 ID (선택)</Label>
+                  <Input
+                    id="forwarder-id"
+                    value={draft.forwarderId}
+                    onChange={(e) => setDraft((p) => ({ ...p, forwarderId: e.target.value }))}
+                    placeholder="예: easy / panda / ..."
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="internal-memo">내부 메모</Label>
+                  <textarea
+                    id="internal-memo"
+                    value={draft.internalMemo}
+                    onChange={(e) => setDraft((p) => ({ ...p, internalMemo: e.target.value }))}
+                    className="min-h-[96px] w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    placeholder="운영 메모(예: 품절/옵션변경/추가 안내 등)"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    마지막 저장: {order.memoUpdatedAt ? formatDate(order.memoUpdatedAt) : "-"}
+                  </p>
                 </div>
               </div>
             </div>

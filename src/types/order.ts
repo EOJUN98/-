@@ -16,6 +16,11 @@ export interface OrderListItem {
   marketCode: string | null;
   marketStatus: string | null;
   internalStatus: OrderInternalStatus | string;
+  overseasOrderNumber: string | null;
+  overseasTrackingNumber: string | null;
+  forwarderId: string | null;
+  internalMemo: string | null;
+  memoUpdatedAt: string | null;
   buyerName: string | null;
   buyerPhone: string | null;
   shippingAddress: string | null;

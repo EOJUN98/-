@@ -115,7 +115,9 @@ export function OrderTable({ initialData }: OrderTableProps) {
         order.orderNumber.toLowerCase().includes(normalizedKeyword) ||
         (order.buyerName ?? "").toLowerCase().includes(normalizedKeyword) ||
         (order.buyerPhone ?? "").toLowerCase().includes(normalizedKeyword) ||
-        (order.trackingNumber ?? "").toLowerCase().includes(normalizedKeyword)
+        (order.trackingNumber ?? "").toLowerCase().includes(normalizedKeyword) ||
+        (order.overseasTrackingNumber ?? "").toLowerCase().includes(normalizedKeyword) ||
+        (order.overseasOrderNumber ?? "").toLowerCase().includes(normalizedKeyword)
       );
     });
   }, [orders, keyword, marketFilter, statusFilter]);
@@ -218,7 +220,7 @@ export function OrderTable({ initialData }: OrderTableProps) {
         <Input
           value={keyword}
           onChange={(event) => setKeyword(event.target.value)}
-          placeholder="주문번호/수취인/전화번호/송장번호 검색"
+          placeholder="주문번호/수취인/전화번호/송장번호/해외트래킹 검색"
         />
 
         <Select value={marketFilter} onValueChange={setMarketFilter}>
@@ -295,13 +297,14 @@ export function OrderTable({ initialData }: OrderTableProps) {
               <TableHead className="w-[100px]">주문상태</TableHead>
               <TableHead>수취인</TableHead>
               <TableHead className="w-[110px]">결제금액</TableHead>
+              <TableHead className="w-[160px]">해외트래킹</TableHead>
               <TableHead className="w-[160px]">송장번호</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filteredOrders.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="h-28 text-center text-muted-foreground">
+                <TableCell colSpan={10} className="h-28 text-center text-muted-foreground">
                   표시할 주문이 없습니다.
                 </TableCell>
               </TableRow>
@@ -348,6 +351,18 @@ export function OrderTable({ initialData }: OrderTableProps) {
                     </div>
                   </TableCell>
                   <TableCell className="font-medium">{formatPrice(order.totalPrice)}</TableCell>
+                  <TableCell>
+                    {order.overseasTrackingNumber ? (
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-medium">{order.overseasTrackingNumber}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {order.forwarderId ?? "포워더 미입력"}
+                        </p>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">미등록</span>
+                    )}
+                  </TableCell>
                   <TableCell>
                     {order.trackingNumber ? (
                       <div className="space-y-0.5">

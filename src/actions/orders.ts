@@ -197,7 +197,7 @@ export async function getOrderDetailAction(orderId: string): Promise<{
   const { data: row, error } = await supabase
     .from("orders")
     .select(
-      "id, order_number, market_config_id, market_status, internal_status, buyer_name, buyer_phone, shipping_address, personal_customs_code, total_price, order_date, tracking_number, courier_code, created_at"
+      "id, order_number, market_config_id, market_status, internal_status, overseas_order_number, overseas_tracking_number, forwarder_id, internal_memo, memo_updated_at, buyer_name, buyer_phone, shipping_address, personal_customs_code, total_price, order_date, tracking_number, courier_code, created_at"
     )
     .eq("id", orderId)
     .eq("user_id", user.id)
@@ -244,6 +244,11 @@ export async function getOrderDetailAction(orderId: string): Promise<{
     marketCode,
     marketStatus: row.market_status as string | null,
     internalStatus: (row.internal_status as OrderInternalStatus) ?? "collected",
+    overseasOrderNumber: (row.overseas_order_number as string | null) ?? null,
+    overseasTrackingNumber: (row.overseas_tracking_number as string | null) ?? null,
+    forwarderId: (row.forwarder_id as string | null) ?? null,
+    internalMemo: (row.internal_memo as string | null) ?? null,
+    memoUpdatedAt: (row.memo_updated_at as string | null) ?? null,
     buyerName: row.buyer_name as string | null,
     buyerPhone: row.buyer_phone as string | null,
     shippingAddress: row.shipping_address as string | null,
@@ -257,6 +262,62 @@ export async function getOrderDetailAction(orderId: string): Promise<{
   };
 
   return { success: true, order: orderDetail };
+}
+
+// ── Overseas tracking + internal memo update ──
+
+const updateOverseasSchema = z.object({
+  orderId: z.string().uuid(),
+  overseasOrderNumber: z.string().trim().max(120).nullable().optional(),
+  overseasTrackingNumber: z.string().trim().max(120).nullable().optional(),
+  forwarderId: z.string().trim().max(120).nullable().optional(),
+  internalMemo: z.string().trim().max(5000).nullable().optional(),
+});
+
+function normalizeNullableText(value: string | null | undefined) {
+  if (typeof value === "undefined") return undefined;
+  const trimmed = (value ?? "").trim();
+  return trimmed ? trimmed : null;
+}
+
+export async function updateOrderOverseasAndMemoAction(input: z.infer<typeof updateOverseasSchema>) {
+  const parsed = updateOverseasSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false as const, error: parsed.error.issues.map((i) => i.message).join(", ") };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false as const, error: "로그인이 필요합니다" };
+
+  const payload: Record<string, unknown> = {};
+  const overseasOrderNumber = normalizeNullableText(parsed.data.overseasOrderNumber);
+  const overseasTrackingNumber = normalizeNullableText(parsed.data.overseasTrackingNumber);
+  const forwarderId = normalizeNullableText(parsed.data.forwarderId);
+  const internalMemo = normalizeNullableText(parsed.data.internalMemo);
+
+  if (typeof overseasOrderNumber !== "undefined") payload.overseas_order_number = overseasOrderNumber;
+  if (typeof overseasTrackingNumber !== "undefined") payload.overseas_tracking_number = overseasTrackingNumber;
+  if (typeof forwarderId !== "undefined") payload.forwarder_id = forwarderId;
+  if (typeof internalMemo !== "undefined") {
+    payload.internal_memo = internalMemo;
+    payload.memo_updated_at = new Date().toISOString();
+  }
+
+  if (Object.keys(payload).length === 0) {
+    return { success: true as const };
+  }
+
+  const { error } = await supabase
+    .from("orders")
+    .update(payload)
+    .eq("id", parsed.data.orderId)
+    .eq("user_id", user.id);
+
+  if (error) return { success: false as const, error: error.message };
+
+  revalidatePath("/orders");
+  return { success: true as const };
 }
 
 // ── 수동 주문 동기화 트리거 ──

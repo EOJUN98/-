@@ -166,25 +166,36 @@ CREATE TABLE IF NOT EXISTS public.market_publish_logs (
     synced_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now())
 );
 
-CREATE TABLE IF NOT EXISTS public.orders (
-    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
-    market_config_id UUID REFERENCES public.user_market_configs(id) ON DELETE SET NULL,
-    order_number VARCHAR(100) NOT NULL,
-    market_status VARCHAR(50),
-    buyer_name TEXT,
-    buyer_phone TEXT,
-    personal_customs_code TEXT,
-    shipping_address TEXT,
-    total_price INT,
-    order_date TIMESTAMP WITH TIME ZONE,
-    tracking_number VARCHAR(100),
-    courier_code VARCHAR(50),
-    internal_status VARCHAR(50) DEFAULT 'collected',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()),
-    UNIQUE(user_id, order_number)
-);
+ CREATE TABLE IF NOT EXISTS public.orders (
+     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+     market_config_id UUID REFERENCES public.user_market_configs(id) ON DELETE SET NULL,
+     order_number VARCHAR(100) NOT NULL,
+     market_status VARCHAR(50),
+     buyer_name TEXT,
+     buyer_phone TEXT,
+     personal_customs_code TEXT,
+     shipping_address TEXT,
+     total_price INT,
+     order_date TIMESTAMP WITH TIME ZONE,
+     tracking_number VARCHAR(100),
+     courier_code VARCHAR(50),
+     internal_status VARCHAR(50) DEFAULT 'collected',
+     overseas_order_number TEXT,
+     overseas_tracking_number TEXT,
+     forwarder_id TEXT,
+     internal_memo TEXT,
+     memo_updated_at TIMESTAMP WITH TIME ZONE,
+     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()),
+     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now()),
+     UNIQUE(user_id, order_number)
+ );
+
+ ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS overseas_order_number TEXT;
+ ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS overseas_tracking_number TEXT;
+ ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS forwarder_id TEXT;
+ ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS internal_memo TEXT;
+ ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS memo_updated_at TIMESTAMP WITH TIME ZONE;
 
 CREATE TABLE IF NOT EXISTS public.order_items (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,

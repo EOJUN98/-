@@ -103,6 +103,7 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("all");
   const [editOpen, setEditOpen] = useState(false);
   const [editName, setEditName] = useState("");
+  const [optimisticJobNames, setOptimisticJobNames] = useState<Record<string, string>>({});
   const [isPending, startTransition] = useTransition();
   const { toast } = useToast();
 
@@ -268,10 +269,12 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
 
   const selectedJobName = useMemo(() => {
     if (!selectedJob) return "";
+    const optimistic = (optimisticJobNames[selectedJob.id] ?? "").trim();
+    if (optimistic) return optimistic;
     const name = (selectedJob.display_name ?? "").trim()
       || (typeof selectedJob.options?.displayName === "string" ? selectedJob.options.displayName.trim() : "");
     return name;
-  }, [selectedJob]);
+  }, [optimisticJobNames, selectedJob]);
 
   return (
     <Card>
@@ -300,11 +303,22 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
               <SelectContent>
                 <SelectItem value="all">전체 그룹</SelectItem>
                 <SelectItem value="unassigned">그룹 미지정(전체 표시)</SelectItem>
-                {jobs.map((job) => (
-                  <SelectItem key={job.id} value={job.id}>
-                    {formatJobLabel(job)}
-                  </SelectItem>
-                ))}
+                {jobs.map((job) => {
+                  const override = (optimisticJobNames[job.id] ?? "").trim();
+                  const jobForLabel = override
+                    ? {
+                        ...job,
+                        display_name: override,
+                        options: { ...(job.options ?? {}), displayName: override },
+                      }
+                    : job;
+
+                  return (
+                    <SelectItem key={job.id} value={job.id}>
+                      {formatJobLabel(jobForLabel)}
+                    </SelectItem>
+                  );
+                })}
               </SelectContent>
             </Select>
             {selectedJob && (
@@ -355,6 +369,7 @@ export function CollectedProductsCard({ jobs = [] }: { jobs?: CollectionJobLike[
                             toast({ title: "수정 실패", description: res.error, variant: "destructive" });
                             return;
                           }
+                          setOptimisticJobNames((prev) => ({ ...prev, [selectedJob.id]: next }));
                           toast({ title: "그룹명이 수정되었습니다" });
                           setEditOpen(false);
                         });

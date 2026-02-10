@@ -27,6 +27,7 @@ const retryFailedQueueSchema = z.object({
 interface ProductPublishRow {
   id: string;
   user_id: string;
+  raw_id: string | null;
   name: string;
   description_html: string | null;
   category_id: number | null;
@@ -217,29 +218,82 @@ async function insertPublishLog(params: {
   });
 }
 
-function buildPublishableProduct(product: ProductPublishRow, optimizedName: string): PublishableProduct {
-  if (!product.category_id) {
-    throw new Error("category_id가 없어 마켓 전송을 진행할 수 없습니다");
+function marketLabel(marketCode: PublishMarketCode) {
+  if (marketCode === "coupang") return "쿠팡";
+  return "스마트스토어";
+}
+
+function buildPublishableProduct(params: {
+  product: ProductPublishRow;
+  optimizedName: string;
+  marketCode: PublishMarketCode;
+  categoryId: number | null;
+}): PublishableProduct {
+  if (!params.categoryId) {
+    throw new Error(`${marketLabel(params.marketCode)} 카테고리 ID가 없어 마켓 전송을 진행할 수 없습니다`);
   }
 
-  if (!product.main_image_url) {
+  if (!params.product.main_image_url) {
     throw new Error("대표 이미지가 없어 마켓 전송을 진행할 수 없습니다");
   }
 
-  const salePrice = toNumber(product.sale_price, 0);
+  const salePrice = toNumber(params.product.sale_price, 0);
   if (salePrice <= 0) {
     throw new Error("판매가가 0 이하라 마켓 전송을 진행할 수 없습니다");
   }
 
   return {
-    id: product.id,
-    name: optimizedName,
-    descriptionHtml: product.description_html ?? `<p>${optimizedName}</p>`,
-    categoryId: product.category_id,
+    id: params.product.id,
+    name: params.optimizedName,
+    descriptionHtml: params.product.description_html ?? `<p>${params.optimizedName}</p>`,
+    categoryId: params.categoryId,
     salePrice,
-    mainImageUrl: product.main_image_url,
-    stockQuantity: product.stock_quantity ?? 999
+    mainImageUrl: params.product.main_image_url,
+    stockQuantity: params.product.stock_quantity ?? 999
   };
+}
+
+async function resolveMarketCategoryId(params: {
+  supabase: ReturnType<typeof createSupabaseServerClient>;
+  userId: string;
+  product: ProductPublishRow;
+  marketCode: PublishMarketCode;
+}): Promise<number | null> {
+  const fallback = params.product.category_id ?? null;
+  if (!params.product.raw_id) return fallback;
+
+  const { data: rawRow, error: rawError } = await params.supabase
+    .from("raw_products")
+    .select("job_id")
+    .eq("user_id", params.userId)
+    .eq("id", params.product.raw_id)
+    .maybeSingle();
+
+  if (rawError || !rawRow?.job_id) return fallback;
+
+  const { data: jobRow, error: jobError } = await params.supabase
+    .from("collection_jobs")
+    .select("options")
+    .eq("user_id", params.userId)
+    .eq("id", rawRow.job_id)
+    .maybeSingle();
+
+  if (jobError || !jobRow) return fallback;
+
+  const options = (jobRow.options ?? {}) as Record<string, unknown>;
+  const marketMap = (options.marketCategoryIds ?? {}) as Record<string, unknown>;
+
+  const key = params.marketCode === "coupang" ? "coupang" : "smartstore";
+  const fromMap = marketMap[key];
+  if (typeof fromMap === "number" && Number.isFinite(fromMap)) return Math.trunc(fromMap);
+
+  // Backward compatibility (older UI stored only categoryId).
+  const legacy = options.categoryId;
+  if (params.marketCode === "smartstore" && typeof legacy === "number" && Number.isFinite(legacy)) {
+    return Math.trunc(legacy);
+  }
+
+  return fallback;
 }
 
 async function publishByMarket(params: {
@@ -292,7 +346,7 @@ async function getAuthenticatedUserAndProduct(params: {
 
   const { data: productRow, error: productError } = await supabase
     .from("products")
-    .select("id, user_id, name, description_html, category_id, sale_price, main_image_url, stock_quantity")
+    .select("id, user_id, raw_id, name, description_html, category_id, sale_price, main_image_url, stock_quantity")
     .eq("id", params.productId)
     .eq("user_id", user.id)
     .single();
@@ -353,7 +407,19 @@ async function executePublish(params: {
     : params.product.name;
 
   try {
-    const publishProduct = buildPublishableProduct(params.product, optimizedName);
+    const categoryId = await resolveMarketCategoryId({
+      supabase: params.supabase,
+      userId: params.userId,
+      product: params.product,
+      marketCode: params.marketCode,
+    });
+
+    const publishProduct = buildPublishableProduct({
+      product: params.product,
+      optimizedName,
+      marketCode: params.marketCode,
+      categoryId,
+    });
     const publishResult = await publishByMarket({
       marketCode: params.marketCode,
       product: publishProduct,

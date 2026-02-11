@@ -27,6 +27,7 @@ import type { OrderDetail } from "@/types/order";
 
 interface OrderDetailDialogProps {
   orderId: string | null;
+  courierNamesByCode: Record<string, string>;
   onClose: () => void;
 }
 
@@ -58,7 +59,16 @@ function formatDate(value: string | null) {
   });
 }
 
-export function OrderDetailDialog({ orderId, onClose }: OrderDetailDialogProps) {
+function formatCourierLabel(code: string | null, courierNamesByCode: Record<string, string>) {
+  if (!code) return null;
+  const normalized = code.trim().toLowerCase();
+  const mapped = courierNamesByCode[normalized];
+  if (!mapped) return code;
+  if (mapped.toLowerCase() === normalized) return mapped;
+  return `${mapped} (${code})`;
+}
+
+export function OrderDetailDialog({ orderId, courierNamesByCode, onClose }: OrderDetailDialogProps) {
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -239,7 +249,7 @@ export function OrderDetailDialog({ orderId, onClose }: OrderDetailDialogProps) 
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
                   <p className="text-muted-foreground">택배사</p>
-                  <p>{order.courierCode ?? "미등록"}</p>
+                  <p>{formatCourierLabel(order.courierCode, courierNamesByCode) ?? "미등록"}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">송장번호</p>

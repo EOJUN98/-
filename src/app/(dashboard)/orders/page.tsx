@@ -1,9 +1,12 @@
 import { OrderTable } from "@/components/orders/order-table";
 import { TrackingUpload } from "@/components/orders/tracking-upload";
-import { getOrdersForDashboard } from "@/lib/queries/orders";
+import { getCourierNameMapForDashboard, getOrdersForDashboard } from "@/lib/queries/orders";
 
 export default async function OrdersPage() {
-  const { data: orders, error } = await getOrdersForDashboard();
+  const [{ data: orders, error }, { data: courierNamesByCode }] = await Promise.all([
+    getOrdersForDashboard(),
+    getCourierNameMapForDashboard(),
+  ]);
 
   return (
     <section className="space-y-4">
@@ -21,7 +24,7 @@ export default async function OrdersPage() {
       ) : (
         <div className="space-y-4">
           <TrackingUpload />
-          <OrderTable initialData={orders} />
+          <OrderTable initialData={orders} courierNamesByCode={courierNamesByCode} />
         </div>
       )}
     </section>

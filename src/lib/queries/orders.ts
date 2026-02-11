@@ -104,3 +104,57 @@ export async function getOrdersForDashboard(limit = 300) {
     error: null as string | null
   };
 }
+
+interface CourierCompanyRow {
+  code: string;
+  name: string;
+  coupang_code: string | null;
+  smartstore_code: string | null;
+  eleventh_code: string | null;
+  gmarket_code: string | null;
+}
+
+function normalizeCourierKey(value: string) {
+  return value.trim().toLowerCase();
+}
+
+export async function getCourierNameMapForDashboard() {
+  const supabase = createSupabaseServerClient();
+
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { data: {} as Record<string, string>, error: "로그인이 필요합니다" };
+  }
+
+  const { data: rows, error } = await supabase
+    .from("courier_companies")
+    .select("code, name, coupang_code, smartstore_code, eleventh_code, gmarket_code")
+    .eq("is_active", true);
+
+  if (error) {
+    return { data: {} as Record<string, string>, error: error.message };
+  }
+
+  const map: Record<string, string> = {};
+  for (const row of (rows ?? []) as CourierCompanyRow[]) {
+    const add = (value: string | null | undefined) => {
+      const key = (value ?? "").trim();
+      if (!key) return;
+      map[normalizeCourierKey(key)] = row.name;
+    };
+
+    add(row.code);
+    add(row.coupang_code);
+    add(row.smartstore_code);
+    add(row.eleventh_code);
+    add(row.gmarket_code);
+  }
+
+  return {
+    data: map,
+    error: null as string | null
+  };
+}

@@ -28,6 +28,7 @@ import { OrderDetailDialog } from "./order-detail-dialog";
 
 interface OrderTableProps {
   initialData: OrderListItem[];
+  courierNamesByCode: Record<string, string>;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -83,7 +84,16 @@ function formatPrice(value: number) {
   return `${value.toLocaleString("ko-KR")}원`;
 }
 
-export function OrderTable({ initialData }: OrderTableProps) {
+function formatCourierLabel(code: string | null, courierNamesByCode: Record<string, string>) {
+  if (!code) return null;
+  const normalized = code.trim().toLowerCase();
+  const mapped = courierNamesByCode[normalized];
+  if (!mapped) return code;
+  if (mapped.toLowerCase() === normalized) return mapped;
+  return `${mapped} (${code})`;
+}
+
+export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps) {
   const [orders, setOrders] = useState(initialData);
   const [keyword, setKeyword] = useState("");
   const [marketFilter, setMarketFilter] = useState("all");
@@ -214,7 +224,7 @@ export function OrderTable({ initialData }: OrderTableProps) {
         해외트래킹: order.overseasTrackingNumber ?? "",
         포워더: order.forwarderId ?? "",
         국내송장: order.trackingNumber ?? "",
-        택배사: order.courierCode ?? "",
+        택배사: formatCourierLabel(order.courierCode, courierNamesByCode) ?? "",
       };
     }
 
@@ -244,7 +254,7 @@ export function OrderTable({ initialData }: OrderTableProps) {
       전화번호: o.buyerPhone ?? "",
       배송지: o.shippingAddress ?? "",
       국내송장: o.trackingNumber ?? "",
-      택배사: o.courierCode ?? "",
+      택배사: formatCourierLabel(o.courierCode, courierNamesByCode) ?? "",
       해외트래킹: o.overseasTrackingNumber ?? "",
       포워더: o.forwarderId ?? "",
       내부상태: statusLabel(o.internalStatus),
@@ -456,7 +466,9 @@ export function OrderTable({ initialData }: OrderTableProps) {
                     {order.trackingNumber ? (
                       <div className="space-y-0.5">
                         <p className="text-xs font-medium">{order.trackingNumber}</p>
-                        <p className="text-xs text-muted-foreground">{order.courierCode ?? "택배사 미입력"}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatCourierLabel(order.courierCode, courierNamesByCode) ?? "택배사 미입력"}
+                        </p>
                       </div>
                     ) : (
                       <span className="text-xs text-muted-foreground">미등록</span>
@@ -470,7 +482,11 @@ export function OrderTable({ initialData }: OrderTableProps) {
       </div>
 
       {/* 주문 상세 다이얼로그 */}
-      <OrderDetailDialog orderId={detailOrderId} onClose={() => setDetailOrderId(null)} />
+      <OrderDetailDialog
+        orderId={detailOrderId}
+        courierNamesByCode={courierNamesByCode}
+        onClose={() => setDetailOrderId(null)}
+      />
     </div>
   );
 }

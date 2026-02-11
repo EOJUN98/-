@@ -38,6 +38,44 @@ CREATE TABLE IF NOT EXISTS public.user_market_configs (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc', now())
 );
 
+-- ── Couriers (배송사 설정; Phase 6-8) ──
+CREATE TABLE IF NOT EXISTS public.courier_companies (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(20) NOT NULL UNIQUE,             -- 'cj', 'lotte', 'hanjin', 'post', ...
+    name VARCHAR(50) NOT NULL,                    -- 'CJ대한통운', '롯데택배', ...
+    -- 마켓별 코드 매핑
+    coupang_code VARCHAR(50),
+    smartstore_code VARCHAR(50),
+    eleventh_code VARCHAR(50),
+    gmarket_code VARCHAR(50),
+    is_active BOOLEAN DEFAULT true
+);
+
+CREATE TABLE IF NOT EXISTS public.user_courier_settings (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+    default_courier_code VARCHAR(20) REFERENCES public.courier_companies(code),
+    market_config_id UUID REFERENCES public.user_market_configs(id) ON DELETE CASCADE,
+    courier_code VARCHAR(20) REFERENCES public.courier_companies(code),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 초기 데이터 (주요 택배사)
+INSERT INTO public.courier_companies (code, name, coupang_code, smartstore_code, eleventh_code, gmarket_code, is_active) VALUES
+    ('cj', 'CJ대한통운', 'CJGLS', 'CJGLS', NULL, NULL, true),
+    ('lotte', '롯데택배', 'LOTTE', 'LOTTE', NULL, NULL, true),
+    ('hanjin', '한진택배', 'HANJIN', 'HANJIN', NULL, NULL, true),
+    ('post', '우체국택배', 'EPOST', 'EPOST', NULL, NULL, true),
+    ('logen', '로젠택배', 'LOGEN', 'LOGEN', NULL, NULL, true),
+    ('cu', 'CU편의점택배', 'CUPOST', 'CUPOST', NULL, NULL, true)
+ON CONFLICT (code) DO UPDATE SET
+    name = EXCLUDED.name,
+    coupang_code = EXCLUDED.coupang_code,
+    smartstore_code = EXCLUDED.smartstore_code,
+    eleventh_code = EXCLUDED.eleventh_code,
+    gmarket_code = EXCLUDED.gmarket_code,
+    is_active = EXCLUDED.is_active;
+
 CREATE TABLE IF NOT EXISTS public.collection_jobs (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
@@ -326,6 +364,7 @@ CREATE INDEX IF NOT EXISTS idx_orders_user ON public.orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON public.orders(internal_status);
 CREATE INDEX IF NOT EXISTS idx_collection_jobs_status ON public.collection_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_cs_inquiries_answered ON public.cs_inquiries(is_answered);
+CREATE INDEX IF NOT EXISTS idx_ucs_user ON public.user_courier_settings(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cs_inquiries_unique_market_inquiry
     ON public.cs_inquiries(user_id, market_config_id, inquiry_id);
 CREATE INDEX IF NOT EXISTS idx_cs_templates_user_created ON public.cs_templates(user_id, created_at DESC);
@@ -353,6 +392,7 @@ ALTER TABLE public.order_sync_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cs_sync_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tracking_push_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_sourcing_configs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_courier_settings ENABLE ROW LEVEL SECURITY;
 
 -- Policies (DROP IF EXISTS + CREATE to ensure correct definition)
 DROP POLICY IF EXISTS "Users manage own configs" ON public.user_market_configs;
@@ -427,6 +467,10 @@ CREATE POLICY "Users manage own tracking push logs" ON public.tracking_push_logs
 
 DROP POLICY IF EXISTS "Users manage own sourcing configs" ON public.user_sourcing_configs;
 CREATE POLICY "Users manage own sourcing configs" ON public.user_sourcing_configs
+    FOR ALL USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users manage own courier settings" ON public.user_courier_settings;
+CREATE POLICY "Users manage own courier settings" ON public.user_courier_settings
     FOR ALL USING (auth.uid() = user_id);
 
 -- ==========================================

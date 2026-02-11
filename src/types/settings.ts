@@ -29,6 +29,26 @@ export interface MarketFeeConfig {
   feeRate: number;
 }
 
+export interface CourierCompany {
+  id: number;
+  code: string;
+  name: string;
+  coupangCode: string | null;
+  smartstoreCode: string | null;
+  eleventhCode: string | null;
+  gmarketCode: string | null;
+  isActive: boolean;
+}
+
+export interface UserCourierSetting {
+  id: string;
+  userId: string;
+  defaultCourierCode: string | null;
+  marketConfigId: string | null;
+  courierCode: string | null;
+  createdAt: string;
+}
+
 export const DEFAULT_MARKET_FEES: MarketFeeConfig[] = [
   { marketCode: "coupang", marketLabel: "쿠팡", feeRate: 10.8 },
   { marketCode: "smartstore", marketLabel: "스마트스토어", feeRate: 5.5 },

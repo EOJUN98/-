@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { encryptSecret, decryptSecretIfNeeded } from "@/lib/security/crypto";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { MarketConfigSummary, SourcingConfig, MarketFeeConfig } from "@/types/settings";
+import type { MarketConfigSummary, SourcingConfig, MarketFeeConfig, CourierCompany } from "@/types/settings";
 import { DEFAULT_MARKET_FEES } from "@/types/settings";
 
 const saveMarketConfigSchema = z.object({
@@ -187,6 +187,114 @@ export async function saveMarketConfigAction(input: z.infer<typeof saveMarketCon
     success: true as const,
     config: mapRowToSummary(writeResult.data)
   };
+}
+
+// ── Courier Settings (Phase 6-8) ──
+
+interface CourierCompanyRow {
+  id: number;
+  code: string;
+  name: string;
+  coupang_code: string | null;
+  smartstore_code: string | null;
+  eleventh_code: string | null;
+  gmarket_code: string | null;
+  is_active: boolean | null;
+}
+
+function mapCourierRow(row: CourierCompanyRow): CourierCompany {
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    coupangCode: row.coupang_code ?? null,
+    smartstoreCode: row.smartstore_code ?? null,
+    eleventhCode: row.eleventh_code ?? null,
+    gmarketCode: row.gmarket_code ?? null,
+    isActive: Boolean(row.is_active ?? true),
+  };
+}
+
+export async function getCourierCompanies(): Promise<{ data: CourierCompany[]; error?: string }> {
+  const supabase = createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { data: [], error: "로그인이 필요합니다" };
+  }
+
+  const { data, error } = await supabase
+    .from("courier_companies")
+    .select("id, code, name, coupang_code, smartstore_code, eleventh_code, gmarket_code, is_active")
+    .order("id", { ascending: true });
+
+  if (error) return { data: [], error: error.message };
+
+  return { data: (data ?? []).map((row) => mapCourierRow(row as CourierCompanyRow)) };
+}
+
+export async function getDefaultCourierSetting(): Promise<{ data: { defaultCourierCode: string | null }; error?: string }> {
+  const supabase = createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { data: { defaultCourierCode: null }, error: "로그인이 필요합니다" };
+  }
+
+  const { data, error } = await supabase
+    .from("user_courier_settings")
+    .select("default_courier_code, created_at")
+    .eq("user_id", user.id)
+    .is("market_config_id", null)
+    .is("courier_code", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return { data: { defaultCourierCode: null }, error: error.message };
+
+  return { data: { defaultCourierCode: (data?.default_courier_code ?? null) as string | null } };
+}
+
+const saveDefaultCourierSchema = z.object({
+  defaultCourierCode: z.string().trim().max(20).nullable(),
+});
+
+export async function saveDefaultCourierSettingAction(input: z.infer<typeof saveDefaultCourierSchema>) {
+  const parsed = saveDefaultCourierSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false as const, error: parsed.error.issues.map((i) => i.message).join(", ") };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false as const, error: "로그인이 필요합니다" };
+
+  const nextCode = parsed.data.defaultCourierCode ? parsed.data.defaultCourierCode.trim() : null;
+
+  // Keep exactly one "default" row per user: market_config_id IS NULL + courier_code IS NULL
+  const { error: deleteError } = await supabase
+    .from("user_courier_settings")
+    .delete()
+    .eq("user_id", user.id)
+    .is("market_config_id", null)
+    .is("courier_code", null);
+
+  if (deleteError) return { success: false as const, error: deleteError.message };
+
+  if (!nextCode) {
+    revalidatePath("/settings");
+    return { success: true as const, defaultCourierCode: null as string | null };
+  }
+
+  const { error: insertError } = await supabase
+    .from("user_courier_settings")
+    .insert({ user_id: user.id, default_courier_code: nextCode });
+
+  if (insertError) return { success: false as const, error: insertError.message };
+
+  revalidatePath("/settings");
+  return { success: true as const, defaultCourierCode: nextCode };
 }
 
 // ── Sourcing Config ──

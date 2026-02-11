@@ -1,14 +1,23 @@
+import { CourierPanel } from "@/components/settings/courier-panel";
 import { MarketConfigPanel } from "@/components/settings/market-config-panel";
 import { MarketFeePanel } from "@/components/settings/market-fee-panel";
 import { SourcingConfigPanel } from "@/components/settings/sourcing-config-panel";
-import { getSourcingConfig, getMarketFeeRates } from "@/actions/settings";
+import { getSourcingConfig, getMarketFeeRates, getCourierCompanies, getDefaultCourierSetting } from "@/actions/settings";
 import { getMarketConfigSummaries } from "@/lib/queries/settings";
 
 export default async function SettingsPage() {
-  const [{ data, error }, { data: sourcingConfig }, { data: marketFees }] = await Promise.all([
+  const [
+    { data, error },
+    { data: sourcingConfig },
+    { data: marketFees },
+    { data: courierCompanies },
+    { data: courierDefault },
+  ] = await Promise.all([
     getMarketConfigSummaries(),
     getSourcingConfig(),
     getMarketFeeRates(),
+    getCourierCompanies(),
+    getDefaultCourierSetting(),
   ]);
 
   return (
@@ -29,6 +38,10 @@ export default async function SettingsPage() {
       <MarketConfigPanel initialConfigs={data} />
       <MarketFeePanel initialFees={marketFees} />
       <SourcingConfigPanel initialConfig={sourcingConfig} />
+      <CourierPanel
+        initialCompanies={courierCompanies}
+        initialDefaultCourierCode={courierDefault.defaultCourierCode}
+      />
     </section>
   );
 }

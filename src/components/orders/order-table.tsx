@@ -103,12 +103,16 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
   const initialMarket = searchParams.get("market") ?? "all";
   const initialStatus = searchParams.get("status") ?? "all";
   const initialCourier = searchParams.get("courier") ?? "all";
+  const initialFromDate = searchParams.get("from") ?? "";
+  const initialToDate = searchParams.get("to") ?? "";
 
   const [orders, setOrders] = useState(initialData);
   const [keyword, setKeyword] = useState(initialKeyword);
   const [marketFilter, setMarketFilter] = useState(initialMarket);
   const [statusFilter, setStatusFilter] = useState(initialStatus);
   const [courierFilter, setCourierFilter] = useState(initialCourier);
+  const [fromDate, setFromDate] = useState(initialFromDate);
+  const [toDate, setToDate] = useState(initialToDate);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -139,6 +143,9 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
 
   const filteredOrders = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();
+    const fromTs = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null;
+    const toTs = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : null;
+
     return orders.filter((order) => {
       if (marketFilter !== "all" && order.marketCode !== marketFilter) return false;
       if (statusFilter !== "all" && order.internalStatus !== statusFilter) return false;
@@ -146,6 +153,15 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
         const courierLabel = formatCourierLabel(order.courierCode, courierNamesByCode);
         if ((courierLabel ?? "none") !== courierFilter) return false;
       }
+
+      if (fromTs || toTs) {
+        const sourceDate = order.orderDate ?? order.createdAt;
+        const orderTs = sourceDate ? new Date(sourceDate).getTime() : NaN;
+        if (!Number.isFinite(orderTs)) return false;
+        if (fromTs && orderTs < fromTs) return false;
+        if (toTs && orderTs > toTs) return false;
+      }
+
       if (!normalizedKeyword) return true;
       return (
         order.orderNumber.toLowerCase().includes(normalizedKeyword) ||
@@ -156,7 +172,7 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
         (order.overseasOrderNumber ?? "").toLowerCase().includes(normalizedKeyword)
       );
     });
-  }, [orders, keyword, marketFilter, statusFilter, courierFilter, courierNamesByCode]);
+  }, [orders, keyword, marketFilter, statusFilter, courierFilter, fromDate, toDate, courierNamesByCode]);
 
   // 상태별 카운트
   const statusCounts = useMemo(() => {
@@ -169,6 +185,22 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
   }, [orders]);
 
   const allVisibleSelected = filteredOrders.length > 0 && filteredOrders.every((o) => selectedIds.has(o.id));
+
+  useEffect(() => {
+    const nextKeyword = searchParams.get("q") ?? "";
+    const nextMarket = searchParams.get("market") ?? "all";
+    const nextStatus = searchParams.get("status") ?? "all";
+    const nextCourier = searchParams.get("courier") ?? "all";
+    const nextFrom = searchParams.get("from") ?? "";
+    const nextTo = searchParams.get("to") ?? "";
+
+    setKeyword((prev) => (prev === nextKeyword ? prev : nextKeyword));
+    setMarketFilter((prev) => (prev === nextMarket ? prev : nextMarket));
+    setStatusFilter((prev) => (prev === nextStatus ? prev : nextStatus));
+    setCourierFilter((prev) => (prev === nextCourier ? prev : nextCourier));
+    setFromDate((prev) => (prev === nextFrom ? prev : nextFrom));
+    setToDate((prev) => (prev === nextTo ? prev : nextTo));
+  }, [searchParams]);
 
   useEffect(() => {
     const next = new URLSearchParams(searchParams.toString());
@@ -185,6 +217,8 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
     setOrDelete("market", marketFilter, "all");
     setOrDelete("status", statusFilter, "all");
     setOrDelete("courier", courierFilter, "all");
+    setOrDelete("from", fromDate, "");
+    setOrDelete("to", toDate, "");
 
     const currentQuery = searchParams.toString();
     const nextQuery = next.toString();
@@ -192,7 +226,7 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
 
     const href = nextQuery ? `${pathname}?${nextQuery}` : pathname;
     router.replace(href, { scroll: false });
-  }, [keyword, marketFilter, statusFilter, courierFilter, pathname, router, searchParams]);
+  }, [keyword, marketFilter, statusFilter, courierFilter, fromDate, toDate, pathname, router, searchParams]);
 
   function toggleSelectAll(checked: boolean) {
     if (!checked) { setSelectedIds(new Set()); return; }
@@ -352,7 +386,7 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
       </div>
 
       {/* 필터 + 동기화 + 엑셀 */}
-      <div className="grid gap-3 rounded-lg border bg-card p-4 md:grid-cols-[1fr_140px_140px_180px_auto_auto_auto] md:items-center">
+      <div className="grid gap-3 rounded-lg border bg-card p-4 md:grid-cols-2 xl:grid-cols-[1fr_130px_130px_180px_140px_140px_auto_auto_auto] xl:items-center">
         <Input
           value={keyword}
           onChange={(event) => setKeyword(event.target.value)}
@@ -395,6 +429,20 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
             ))}
           </SelectContent>
         </Select>
+
+        <Input
+          type="date"
+          value={fromDate}
+          onChange={(event) => setFromDate(event.target.value)}
+          aria-label="시작일"
+        />
+
+        <Input
+          type="date"
+          value={toDate}
+          onChange={(event) => setToDate(event.target.value)}
+          aria-label="종료일"
+        />
 
         <p className="text-sm text-muted-foreground whitespace-nowrap">총 {filteredOrders.length}건</p>
 

@@ -4,10 +4,12 @@ import { randomUUID } from "crypto";
 
 import { revalidatePath } from "next/cache";
 
+import { toMarketCourierCode, toStorageCourierCode } from "@/lib/logistics/courier-code-mapper";
 import { pushTrackingToMarket } from "@/lib/logistics/market-tracking-clients";
 import { parseTrackingUploadFile } from "@/lib/logistics/tracking-parser";
 import { decryptSecretIfNeeded } from "@/lib/security/crypto";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { CourierCompany } from "@/types/settings";
 
 interface UpdatedOrderRow {
   id: string;
@@ -21,6 +23,17 @@ interface MarketConfigRow {
   vendor_id: string | null;
   api_key: string | null;
   secret_key: string | null;
+  is_active: boolean | null;
+}
+
+interface CourierCompanyRow {
+  id: number;
+  code: string;
+  name: string;
+  coupang_code: string | null;
+  smartstore_code: string | null;
+  eleventh_code: string | null;
+  gmarket_code: string | null;
   is_active: boolean | null;
 }
 
@@ -69,6 +82,52 @@ export async function uploadTrackingFileAction(formData: FormData) {
       error: error instanceof Error ? error.message : "송장 파일 파싱에 실패했습니다"
     };
   }
+
+  const { data: courierCompanyRows, error: courierCompanyError } = await supabase
+    .from("courier_companies")
+    .select("id, code, name, coupang_code, smartstore_code, eleventh_code, gmarket_code, is_active")
+    .eq("is_active", true)
+    .order("id", { ascending: true });
+
+  if (courierCompanyError) {
+    return {
+      success: false as const,
+      error: `택배사 설정 조회 실패: ${courierCompanyError.message}`,
+    };
+  }
+
+  const courierCompanies: CourierCompany[] = (courierCompanyRows ?? []).map((row) => {
+    const typed = row as CourierCompanyRow;
+    return {
+      id: typed.id,
+      code: typed.code,
+      name: typed.name,
+      coupangCode: typed.coupang_code,
+      smartstoreCode: typed.smartstore_code,
+      eleventhCode: typed.eleventh_code,
+      gmarketCode: typed.gmarket_code,
+      isActive: Boolean(typed.is_active ?? true),
+    };
+  });
+
+  const { data: defaultCourierSetting, error: defaultCourierError } = await supabase
+    .from("user_courier_settings")
+    .select("default_courier_code, created_at")
+    .eq("user_id", userId)
+    .is("market_config_id", null)
+    .is("courier_code", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (defaultCourierError) {
+    return {
+      success: false as const,
+      error: `기본 택배사 조회 실패: ${defaultCourierError.message}`,
+    };
+  }
+
+  const defaultCourierCode = (defaultCourierSetting?.default_courier_code ?? null) as string | null;
 
   let updatedCount = 0;
   let marketSyncedCount = 0;
@@ -126,6 +185,12 @@ export async function uploadTrackingFileAction(formData: FormData) {
 
   for (let index = 0; index < parsed.rows.length; index += 1) {
     const row = parsed.rows[index];
+    const storageCourierCode = toStorageCourierCode({
+      inputCourierCode: row.courierCode,
+      companies: courierCompanies,
+      defaultCourierCode,
+    });
+
     const payload: {
       tracking_number: string;
       internal_status: string;
@@ -139,8 +204,8 @@ export async function uploadTrackingFileAction(formData: FormData) {
       updated_at: new Date().toISOString()
     };
 
-    if (row.courierCode) {
-      payload.courier_code = row.courierCode;
+    if (storageCourierCode) {
+      payload.courier_code = storageCourierCode;
     }
 
     // 순차 처리로 DB 부하와 시장 API 연동 확장 시 레이스를 줄인다.
@@ -271,16 +336,17 @@ export async function uploadTrackingFileAction(formData: FormData) {
       continue;
     }
 
-    if (marketConfig.market_code !== "coupang" && marketConfig.market_code !== "smartstore") {
+    const marketCodeRaw = marketConfig.market_code;
+    if (marketCodeRaw !== "coupang" && marketCodeRaw !== "smartstore") {
       marketSyncSkippedCount += 1;
-      const message = `${index + 1}행(${row.orderNumber}): 역전송 미지원 마켓(${marketConfig.market_code})`;
+      const message = `${index + 1}행(${row.orderNumber}): 역전송 미지원 마켓(${marketCodeRaw})`;
       marketSyncErrors.push(message);
       // eslint-disable-next-line no-await-in-loop
       await insertTrackingPushLog({
         orderNumber: row.orderNumber,
         orderId: updatedOrder.id,
         marketConfigId: updatedOrder.market_config_id,
-        marketCode: marketConfig.market_code,
+        marketCode: marketCodeRaw,
         status: "skipped",
         failureCategory: "UNSUPPORTED",
         message
@@ -288,12 +354,19 @@ export async function uploadTrackingFileAction(formData: FormData) {
       continue;
     }
 
+    const marketCourierCode = toMarketCourierCode({
+      inputCourierCode: storageCourierCode ?? row.courierCode,
+      companies: courierCompanies,
+      defaultCourierCode,
+      marketCode: marketCodeRaw
+    });
+
     // eslint-disable-next-line no-await-in-loop
     const marketSyncResult = await pushTrackingToMarket({
-      marketCode: marketConfig.market_code,
+      marketCode: marketCodeRaw,
       orderNumber: row.orderNumber,
       trackingNumber: row.trackingNumber,
-      courierCode: row.courierCode,
+      courierCode: marketCourierCode,
       apiKey,
       secretKey,
       vendorId: marketConfig.vendor_id
@@ -313,7 +386,7 @@ export async function uploadTrackingFileAction(formData: FormData) {
         orderNumber: row.orderNumber,
         orderId: updatedOrder.id,
         marketConfigId: updatedOrder.market_config_id,
-        marketCode: marketConfig.market_code,
+        marketCode: marketCodeRaw,
         status: marketSyncResult.skipped ? "skipped" : "success",
         failureCategory: marketSyncResult.category ?? null,
         statusCode: marketSyncResult.statusCode ?? null,
@@ -335,7 +408,7 @@ export async function uploadTrackingFileAction(formData: FormData) {
       orderNumber: row.orderNumber,
       orderId: updatedOrder.id,
       marketConfigId: updatedOrder.market_config_id,
-      marketCode: marketConfig.market_code,
+      marketCode: marketCodeRaw,
       status: "failed",
       failureCategory: marketSyncResult.category ?? null,
       statusCode: marketSyncResult.statusCode ?? null,

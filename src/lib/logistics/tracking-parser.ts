@@ -169,7 +169,7 @@ function parseRowMatrix(parsed: unknown[][]): ParseTrackingFileResult {
 
     const orderNumber = stripFormulaPrefix(cleanCell(current[orderNumberIndex]));
     const trackingNumber = stripFormulaPrefix(cleanCell(current[trackingIndex]));
-    const courierCode = stripFormulaPrefix(cleanCell(current[courierIndex])) || "CJGLS";
+    const courierCode = stripFormulaPrefix(cleanCell(current[courierIndex]));
 
     if (!orderNumber && !trackingNumber) {
       continue;

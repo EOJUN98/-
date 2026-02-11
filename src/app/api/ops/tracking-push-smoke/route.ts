@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 
+import { toMarketCourierCode } from "@/lib/logistics/courier-code-mapper";
 import { pushTrackingToMarket } from "@/lib/logistics/market-tracking-clients";
 import { decryptSecretIfNeeded } from "@/lib/security/crypto";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import type { CourierCompany } from "@/types/settings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,6 +27,23 @@ interface SmokeMarketConfigRow {
   api_key: string | null;
   secret_key: string | null;
   is_active: boolean | null;
+}
+
+interface CourierCompanyRow {
+  id: number;
+  code: string;
+  name: string;
+  coupang_code: string | null;
+  smartstore_code: string | null;
+  eleventh_code: string | null;
+  gmarket_code: string | null;
+  is_active: boolean | null;
+}
+
+interface DefaultCourierSettingRow {
+  user_id: string;
+  default_courier_code: string | null;
+  created_at: string;
 }
 
 function readBearerToken(value: string | null) {
@@ -161,6 +180,64 @@ export async function GET(request: Request) {
     configMap.set(row.id, row);
   }
 
+  const { data: courierRows, error: courierError } = await supabase
+    .from("courier_companies")
+    .select("id, code, name, coupang_code, smartstore_code, eleventh_code, gmarket_code, is_active")
+    .eq("is_active", true)
+    .order("id", { ascending: true });
+
+  if (courierError) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: courierError.message
+      },
+      { status: 500 }
+    );
+  }
+
+  const courierCompanies: CourierCompany[] = (courierRows ?? []).map((row) => {
+    const typed = row as CourierCompanyRow;
+    return {
+      id: typed.id,
+      code: typed.code,
+      name: typed.name,
+      coupangCode: typed.coupang_code,
+      smartstoreCode: typed.smartstore_code,
+      eleventhCode: typed.eleventh_code,
+      gmarketCode: typed.gmarket_code,
+      isActive: Boolean(typed.is_active ?? true)
+    };
+  });
+
+  const userIds = Array.from(new Set(orders.map((order) => order.user_id).filter(Boolean)));
+  const defaultCourierByUserId = new Map<string, string | null>();
+  if (userIds.length > 0) {
+    const { data: defaultCourierRows, error: defaultCourierError } = await supabase
+      .from("user_courier_settings")
+      .select("user_id, default_courier_code, created_at")
+      .in("user_id", userIds)
+      .is("market_config_id", null)
+      .is("courier_code", null)
+      .order("created_at", { ascending: false });
+
+    if (defaultCourierError) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: defaultCourierError.message
+        },
+        { status: 500 }
+      );
+    }
+
+    for (const row of (defaultCourierRows ?? []) as DefaultCourierSettingRow[]) {
+      if (!defaultCourierByUserId.has(row.user_id)) {
+        defaultCourierByUserId.set(row.user_id, row.default_courier_code ?? null);
+      }
+    }
+  }
+
   const results: Array<{
     orderNumber: string;
     marketCode: string | null;
@@ -184,8 +261,6 @@ export async function GET(request: Request) {
 
     const orderNumber = order.order_number;
     const trackingNumber = (order.tracking_number ?? "").trim();
-    const courierCode = (order.courier_code ?? "CJGLS").trim() || "CJGLS";
-
     const configId = order.market_config_id;
     if (!configId) {
       skippedCount += 1;
@@ -236,11 +311,12 @@ export async function GET(request: Request) {
       continue;
     }
 
-    if (config.market_code !== "coupang" && config.market_code !== "smartstore") {
+    const marketCode = config.market_code;
+    if (marketCode !== "coupang" && marketCode !== "smartstore") {
       skippedCount += 1;
       results.push({
         orderNumber,
-        marketCode: config.market_code,
+        marketCode,
         dryRun,
         ok: false,
         skipped: true,
@@ -252,6 +328,14 @@ export async function GET(request: Request) {
       continue;
     }
 
+    const defaultCourierCode = defaultCourierByUserId.get(order.user_id) ?? null;
+    const courierCode = toMarketCourierCode({
+      inputCourierCode: order.courier_code,
+      companies: courierCompanies,
+      defaultCourierCode,
+      marketCode
+    });
+
     let apiKey: string | null = null;
     let secretKey: string | null = null;
 
@@ -262,7 +346,7 @@ export async function GET(request: Request) {
       failedCount += 1;
       results.push({
         orderNumber,
-        marketCode: config.market_code,
+        marketCode,
         dryRun,
         ok: false,
         skipped: false,
@@ -278,7 +362,7 @@ export async function GET(request: Request) {
       failedCount += 1;
       results.push({
         orderNumber,
-        marketCode: config.market_code,
+        marketCode,
         dryRun,
         ok: false,
         skipped: false,
@@ -294,7 +378,7 @@ export async function GET(request: Request) {
       skippedCount += 1;
       results.push({
         orderNumber,
-        marketCode: config.market_code,
+        marketCode,
         dryRun,
         ok: false,
         skipped: true,
@@ -310,7 +394,7 @@ export async function GET(request: Request) {
       skippedCount += 1;
       results.push({
         orderNumber,
-        marketCode: config.market_code,
+        marketCode,
         dryRun,
         ok: true,
         skipped: true,
@@ -325,7 +409,7 @@ export async function GET(request: Request) {
     // Keep sequential execution to avoid sudden burst against marketplace APIs.
     // eslint-disable-next-line no-await-in-loop
     const push = await pushTrackingToMarket({
-      marketCode: config.market_code,
+      marketCode,
       orderNumber,
       trackingNumber,
       courierCode,
@@ -346,7 +430,7 @@ export async function GET(request: Request) {
 
     results.push({
       orderNumber,
-      marketCode: config.market_code,
+      marketCode,
       dryRun,
       ok: push.ok,
       skipped: Boolean(push.skipped),

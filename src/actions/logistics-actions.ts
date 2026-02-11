@@ -49,6 +49,14 @@ interface TrackingPushLogInput {
   attempts?: number | null;
 }
 
+interface CourierMappingSample {
+  orderNumber: string;
+  marketCode: string | null;
+  originalCourierCode: string | null;
+  internalCourierCode: string | null;
+  marketCourierCode: string | null;
+}
+
 export async function uploadTrackingFileAction(formData: FormData) {
   const file = formData.get("file");
 
@@ -133,11 +141,33 @@ export async function uploadTrackingFileAction(formData: FormData) {
   let marketSyncedCount = 0;
   let marketSyncFailedCount = 0;
   let marketSyncSkippedCount = 0;
+  let internalMappedCount = 0;
+  let defaultAppliedCount = 0;
+  let marketMappedCount = 0;
   const rowErrors: string[] = [];
   const marketSyncErrors: string[] = [];
   const auditLogErrors: string[] = [];
+  const courierMappingSamples: CourierMappingSample[] = [];
+  const courierMappingSampleKeys = new Set<string>();
   const marketConfigCache = new Map<string, MarketConfigRow | null>();
   const batchId = randomUUID();
+
+  function normalizeCode(value: string | null | undefined) {
+    return (value ?? "").trim().toLowerCase();
+  }
+
+  function pushMappingSample(sample: CourierMappingSample) {
+    if (courierMappingSamples.length >= 8) return;
+    const key = [
+      sample.marketCode ?? "-",
+      sample.originalCourierCode ?? "-",
+      sample.internalCourierCode ?? "-",
+      sample.marketCourierCode ?? "-",
+    ].join("|");
+    if (courierMappingSampleKeys.has(key)) return;
+    courierMappingSampleKeys.add(key);
+    courierMappingSamples.push(sample);
+  }
 
   async function insertTrackingPushLog(input: TrackingPushLogInput) {
     const { error } = await supabase.from("tracking_push_logs").insert({
@@ -185,11 +215,27 @@ export async function uploadTrackingFileAction(formData: FormData) {
 
   for (let index = 0; index < parsed.rows.length; index += 1) {
     const row = parsed.rows[index];
+    const originalCourierCode = row.courierCode?.trim() || null;
     const storageCourierCode = toStorageCourierCode({
       inputCourierCode: row.courierCode,
       companies: courierCompanies,
       defaultCourierCode,
     });
+    if (
+      !originalCourierCode &&
+      storageCourierCode &&
+      defaultCourierCode &&
+      normalizeCode(storageCourierCode) === normalizeCode(defaultCourierCode)
+    ) {
+      defaultAppliedCount += 1;
+    }
+    if (
+      originalCourierCode &&
+      storageCourierCode &&
+      normalizeCode(originalCourierCode) !== normalizeCode(storageCourierCode)
+    ) {
+      internalMappedCount += 1;
+    }
 
     const payload: {
       tracking_number: string;
@@ -360,6 +406,17 @@ export async function uploadTrackingFileAction(formData: FormData) {
       defaultCourierCode,
       marketCode: marketCodeRaw
     });
+    const sourceCourierCode = (storageCourierCode ?? originalCourierCode ?? "").trim();
+    if (sourceCourierCode && normalizeCode(sourceCourierCode) !== normalizeCode(marketCourierCode)) {
+      marketMappedCount += 1;
+    }
+    pushMappingSample({
+      orderNumber: row.orderNumber,
+      marketCode: marketCodeRaw,
+      originalCourierCode,
+      internalCourierCode: storageCourierCode,
+      marketCourierCode,
+    });
 
     // eslint-disable-next-line no-await-in-loop
     const marketSyncResult = await pushTrackingToMarket({
@@ -432,6 +489,13 @@ export async function uploadTrackingFileAction(formData: FormData) {
     rowErrors,
     marketSyncErrors,
     trackingPushLogErrors: auditLogErrors,
+    courierMappingSummary: {
+      defaultCourierCode,
+      internalMappedCount,
+      defaultAppliedCount,
+      marketMappedCount,
+      samples: courierMappingSamples,
+    },
     batchId
   };
 }

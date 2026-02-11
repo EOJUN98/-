@@ -19,6 +19,19 @@ export function TrackingUpload() {
     marketSyncedCount: number;
     marketSyncFailedCount: number;
     marketSyncSkippedCount: number;
+    courierMappingSummary: {
+      defaultCourierCode: string | null;
+      internalMappedCount: number;
+      defaultAppliedCount: number;
+      marketMappedCount: number;
+      samples: Array<{
+        orderNumber: string;
+        marketCode: string | null;
+        originalCourierCode: string | null;
+        internalCourierCode: string | null;
+        marketCourierCode: string | null;
+      }>;
+    };
   } | null>(null);
   const { toast } = useToast();
 
@@ -53,7 +66,8 @@ export function TrackingUpload() {
         failedCount: result.failedCount,
         marketSyncedCount: result.marketSyncedCount,
         marketSyncFailedCount: result.marketSyncFailedCount,
-        marketSyncSkippedCount: result.marketSyncSkippedCount
+        marketSyncSkippedCount: result.marketSyncSkippedCount,
+        courierMappingSummary: result.courierMappingSummary
       });
 
       if (result.failedCount > 0 || result.marketSyncFailedCount > 0) {
@@ -88,6 +102,23 @@ export function TrackingUpload() {
         {lastSummary ? (
           <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
             최근 처리: {lastSummary.fileName} / 총 {lastSummary.totalRows}건 / DB 성공 {lastSummary.updatedCount}건 / DB 실패 {lastSummary.failedCount}건 / 마켓 성공 {lastSummary.marketSyncedCount}건 / 마켓 실패 {lastSummary.marketSyncFailedCount}건 / 마켓 생략 {lastSummary.marketSyncSkippedCount}건
+            <div className="mt-2 space-y-1">
+              <p>
+                택배사 매핑: 내부코드 변환 {lastSummary.courierMappingSummary.internalMappedCount}건 / 기본값 적용 {lastSummary.courierMappingSummary.defaultAppliedCount}건 / 마켓코드 변환 {lastSummary.courierMappingSummary.marketMappedCount}건
+              </p>
+              <p>
+                기본 택배사: {lastSummary.courierMappingSummary.defaultCourierCode ?? "미지정"}
+              </p>
+              {lastSummary.courierMappingSummary.samples.length > 0 ? (
+                <div className="pt-1 text-xs">
+                  {lastSummary.courierMappingSummary.samples.map((sample, idx) => (
+                    <p key={`${sample.orderNumber}-${idx}`}>
+                      {sample.marketCode ?? "-"} / {sample.originalCourierCode ?? "미입력"} → {sample.internalCourierCode ?? "미지정"} → {sample.marketCourierCode ?? "미지정"}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </div>
         ) : null}
       </CardContent>

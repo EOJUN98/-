@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { bulkStepOrderStatusAction, triggerOrderSyncAction, updateOrderStatusAction } from "@/actions/orders";
 import { Badge } from "@/components/ui/badge";
@@ -94,11 +95,20 @@ function formatCourierLabel(code: string | null, courierNamesByCode: Record<stri
 }
 
 export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const initialKeyword = searchParams.get("q") ?? "";
+  const initialMarket = searchParams.get("market") ?? "all";
+  const initialStatus = searchParams.get("status") ?? "all";
+  const initialCourier = searchParams.get("courier") ?? "all";
+
   const [orders, setOrders] = useState(initialData);
-  const [keyword, setKeyword] = useState("");
-  const [marketFilter, setMarketFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [courierFilter, setCourierFilter] = useState("all");
+  const [keyword, setKeyword] = useState(initialKeyword);
+  const [marketFilter, setMarketFilter] = useState(initialMarket);
+  const [statusFilter, setStatusFilter] = useState(initialStatus);
+  const [courierFilter, setCourierFilter] = useState(initialCourier);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -159,6 +169,30 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
   }, [orders]);
 
   const allVisibleSelected = filteredOrders.length > 0 && filteredOrders.every((o) => selectedIds.has(o.id));
+
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams.toString());
+    const setOrDelete = (key: string, value: string, emptyValue: string) => {
+      const nextValue = value.trim();
+      if (!nextValue || nextValue === emptyValue) {
+        next.delete(key);
+        return;
+      }
+      next.set(key, nextValue);
+    };
+
+    setOrDelete("q", keyword, "");
+    setOrDelete("market", marketFilter, "all");
+    setOrDelete("status", statusFilter, "all");
+    setOrDelete("courier", courierFilter, "all");
+
+    const currentQuery = searchParams.toString();
+    const nextQuery = next.toString();
+    if (currentQuery === nextQuery) return;
+
+    const href = nextQuery ? `${pathname}?${nextQuery}` : pathname;
+    router.replace(href, { scroll: false });
+  }, [keyword, marketFilter, statusFilter, courierFilter, pathname, router, searchParams]);
 
   function toggleSelectAll(checked: boolean) {
     if (!checked) { setSelectedIds(new Set()); return; }

@@ -98,6 +98,7 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
   const [keyword, setKeyword] = useState("");
   const [marketFilter, setMarketFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [courierFilter, setCourierFilter] = useState("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -115,11 +116,26 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
     return values.sort();
   }, [orders]);
 
+  const courierOptions = useMemo(() => {
+    const values = Array.from(
+      new Set(
+        orders
+          .map((order) => formatCourierLabel(order.courierCode, courierNamesByCode))
+          .filter((value): value is string => Boolean(value))
+      )
+    );
+    return values.sort((a, b) => a.localeCompare(b, "ko-KR"));
+  }, [orders, courierNamesByCode]);
+
   const filteredOrders = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();
     return orders.filter((order) => {
       if (marketFilter !== "all" && order.marketCode !== marketFilter) return false;
       if (statusFilter !== "all" && order.internalStatus !== statusFilter) return false;
+      if (courierFilter !== "all") {
+        const courierLabel = formatCourierLabel(order.courierCode, courierNamesByCode);
+        if ((courierLabel ?? "none") !== courierFilter) return false;
+      }
       if (!normalizedKeyword) return true;
       return (
         order.orderNumber.toLowerCase().includes(normalizedKeyword) ||
@@ -130,7 +146,7 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
         (order.overseasOrderNumber ?? "").toLowerCase().includes(normalizedKeyword)
       );
     });
-  }, [orders, keyword, marketFilter, statusFilter]);
+  }, [orders, keyword, marketFilter, statusFilter, courierFilter, courierNamesByCode]);
 
   // 상태별 카운트
   const statusCounts = useMemo(() => {
@@ -302,7 +318,7 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
       </div>
 
       {/* 필터 + 동기화 + 엑셀 */}
-      <div className="grid gap-3 rounded-lg border bg-card p-4 md:grid-cols-[1fr_160px_160px_auto_auto_auto] md:items-center">
+      <div className="grid gap-3 rounded-lg border bg-card p-4 md:grid-cols-[1fr_140px_140px_180px_auto_auto_auto] md:items-center">
         <Input
           value={keyword}
           onChange={(event) => setKeyword(event.target.value)}
@@ -329,6 +345,18 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
             <SelectItem value="all">전체 상태</SelectItem>
             {Object.entries(STATUS_LABELS).map(([value, label]) => (
               <SelectItem key={value} value={value}>{label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select value={courierFilter} onValueChange={setCourierFilter}>
+          <SelectTrigger>
+            <SelectValue placeholder="택배사" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">전체 택배사</SelectItem>
+            {courierOptions.map((courier) => (
+              <SelectItem key={courier} value={courier}>{courier}</SelectItem>
             ))}
           </SelectContent>
         </Select>

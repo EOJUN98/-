@@ -355,6 +355,7 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">전체 택배사</SelectItem>
+            <SelectItem value="none">택배사 미입력</SelectItem>
             {courierOptions.map((courier) => (
               <SelectItem key={courier} value={courier}>{courier}</SelectItem>
             ))}

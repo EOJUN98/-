@@ -60,6 +60,25 @@ CREATE TABLE IF NOT EXISTS public.user_courier_settings (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- ── Forwarders (배송대행지 설정; Phase 7-3) ──
+CREATE TABLE IF NOT EXISTS public.forwarder_companies (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(30) NOT NULL UNIQUE,
+    name VARCHAR(80) NOT NULL,
+    homepage_url TEXT,
+    api_type VARCHAR(30),
+    is_active BOOLEAN DEFAULT true
+);
+
+CREATE TABLE IF NOT EXISTS public.user_forwarder_settings (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+    default_forwarder_code VARCHAR(30) REFERENCES public.forwarder_companies(code),
+    market_config_id UUID REFERENCES public.user_market_configs(id) ON DELETE CASCADE,
+    forwarder_code VARCHAR(30) REFERENCES public.forwarder_companies(code),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- 초기 데이터 (주요 택배사)
 INSERT INTO public.courier_companies (code, name, coupang_code, smartstore_code, eleventh_code, gmarket_code, is_active) VALUES
     ('cj', 'CJ대한통운', 'CJGLS', 'CJGLS', NULL, NULL, true),
@@ -74,6 +93,20 @@ ON CONFLICT (code) DO UPDATE SET
     smartstore_code = EXCLUDED.smartstore_code,
     eleventh_code = EXCLUDED.eleventh_code,
     gmarket_code = EXCLUDED.gmarket_code,
+    is_active = EXCLUDED.is_active;
+
+-- 초기 데이터 (주요 포워더/배송대행지)
+INSERT INTO public.forwarder_companies (code, name, homepage_url, api_type, is_active) VALUES
+    ('basic', '기본배송대행지', NULL, NULL, true),
+    ('buysell', '바이셀스탠다드', 'https://www.buysellstandards.com', NULL, true),
+    ('foryou', '포유', NULL, NULL, true),
+    ('pandalogis', '판다로지스', NULL, NULL, true),
+    ('shipgo', '쉽고', NULL, NULL, true),
+    ('malltail', '몰테일', 'https://post.malltail.com', NULL, true)
+ON CONFLICT (code) DO UPDATE SET
+    name = EXCLUDED.name,
+    homepage_url = EXCLUDED.homepage_url,
+    api_type = EXCLUDED.api_type,
     is_active = EXCLUDED.is_active;
 
 CREATE TABLE IF NOT EXISTS public.collection_jobs (
@@ -365,6 +398,7 @@ CREATE INDEX IF NOT EXISTS idx_orders_status ON public.orders(internal_status);
 CREATE INDEX IF NOT EXISTS idx_collection_jobs_status ON public.collection_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_cs_inquiries_answered ON public.cs_inquiries(is_answered);
 CREATE INDEX IF NOT EXISTS idx_ucs_user ON public.user_courier_settings(user_id);
+CREATE INDEX IF NOT EXISTS idx_ufs_user ON public.user_forwarder_settings(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cs_inquiries_unique_market_inquiry
     ON public.cs_inquiries(user_id, market_config_id, inquiry_id);
 CREATE INDEX IF NOT EXISTS idx_cs_templates_user_created ON public.cs_templates(user_id, created_at DESC);
@@ -393,6 +427,7 @@ ALTER TABLE public.cs_sync_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tracking_push_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_sourcing_configs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_courier_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_forwarder_settings ENABLE ROW LEVEL SECURITY;
 
 -- Policies (DROP IF EXISTS + CREATE to ensure correct definition)
 DROP POLICY IF EXISTS "Users manage own configs" ON public.user_market_configs;
@@ -471,6 +506,10 @@ CREATE POLICY "Users manage own sourcing configs" ON public.user_sourcing_config
 
 DROP POLICY IF EXISTS "Users manage own courier settings" ON public.user_courier_settings;
 CREATE POLICY "Users manage own courier settings" ON public.user_courier_settings
+    FOR ALL USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users manage own forwarder settings" ON public.user_forwarder_settings;
+CREATE POLICY "Users manage own forwarder settings" ON public.user_forwarder_settings
     FOR ALL USING (auth.uid() = user_id);
 
 -- ==========================================

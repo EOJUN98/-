@@ -15,6 +15,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
+import {
   Table,
   TableBody,
   TableCell,
@@ -28,6 +35,8 @@ import type { OrderDetail } from "@/types/order";
 interface OrderDetailDialogProps {
   orderId: string | null;
   courierNamesByCode: Record<string, string>;
+  forwarderNamesByCode: Record<string, string>;
+  forwarderOptions: Array<{ code: string; name: string }>;
   onClose: () => void;
 }
 
@@ -68,7 +77,22 @@ function formatCourierLabel(code: string | null, courierNamesByCode: Record<stri
   return `${mapped} (${code})`;
 }
 
-export function OrderDetailDialog({ orderId, courierNamesByCode, onClose }: OrderDetailDialogProps) {
+function formatForwarderLabel(code: string | null, forwarderNamesByCode: Record<string, string>) {
+  if (!code) return null;
+  const normalized = code.trim().toLowerCase();
+  const mapped = forwarderNamesByCode[normalized];
+  if (!mapped) return code;
+  if (mapped.toLowerCase() === normalized) return mapped;
+  return `${mapped} (${code})`;
+}
+
+export function OrderDetailDialog({
+  orderId,
+  courierNamesByCode,
+  forwarderNamesByCode,
+  forwarderOptions,
+  onClose
+}: OrderDetailDialogProps) {
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -287,13 +311,26 @@ export function OrderDetailDialog({ orderId, courierNamesByCode, onClose }: Orde
                   />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="forwarder-id">배대지/포워더 ID (선택)</Label>
-                  <Input
-                    id="forwarder-id"
-                    value={draft.forwarderId}
-                    onChange={(e) => setDraft((p) => ({ ...p, forwarderId: e.target.value }))}
-                    placeholder="예: easy / panda / ..."
-                  />
+                  <Label>배대지/포워더 (선택)</Label>
+                  <Select
+                    value={draft.forwarderId || "none"}
+                    onValueChange={(value) => setDraft((p) => ({ ...p, forwarderId: value === "none" ? "" : value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="포워더 선택" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">미지정</SelectItem>
+                      {forwarderOptions.map((f) => (
+                        <SelectItem key={f.code} value={f.code}>
+                          {f.name} ({f.code})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    현재값: {formatForwarderLabel(order.forwarderId, forwarderNamesByCode) ?? "미지정"}
+                  </p>
                 </div>
               </div>
             </div>

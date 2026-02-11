@@ -158,3 +158,61 @@ export async function getCourierNameMapForDashboard() {
     error: null as string | null
   };
 }
+
+interface ForwarderCompanyRow {
+  code: string;
+  name: string;
+}
+
+function normalizeForwarderKey(value: string) {
+  return value.trim().toLowerCase();
+}
+
+export async function getForwarderMetaForDashboard() {
+  const supabase = createSupabaseServerClient();
+
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return {
+      data: {
+        options: [] as Array<{ code: string; name: string }>,
+        nameMap: {} as Record<string, string>
+      },
+      error: "로그인이 필요합니다"
+    };
+  }
+
+  const { data: rows, error } = await supabase
+    .from("forwarder_companies")
+    .select("code, name")
+    .eq("is_active", true)
+    .order("id", { ascending: true });
+
+  if (error) {
+    return {
+      data: {
+        options: [] as Array<{ code: string; name: string }>,
+        nameMap: {} as Record<string, string>
+      },
+      error: error.message
+    };
+  }
+
+  const options: Array<{ code: string; name: string }> = [];
+  const nameMap: Record<string, string> = {};
+  for (const row of (rows ?? []) as ForwarderCompanyRow[]) {
+    options.push({ code: row.code, name: row.name });
+    nameMap[normalizeForwarderKey(row.code)] = row.name;
+  }
+
+  return {
+    data: {
+      options,
+      nameMap
+    },
+    error: null as string | null
+  };
+}

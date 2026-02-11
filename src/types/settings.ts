@@ -49,6 +49,24 @@ export interface UserCourierSetting {
   createdAt: string;
 }
 
+export interface ForwarderCompany {
+  id: number;
+  code: string;
+  name: string;
+  homepageUrl: string | null;
+  apiType: string | null;
+  isActive: boolean;
+}
+
+export interface UserForwarderSetting {
+  id: string;
+  userId: string;
+  defaultForwarderCode: string | null;
+  marketConfigId: string | null;
+  forwarderCode: string | null;
+  createdAt: string;
+}
+
 export const DEFAULT_MARKET_FEES: MarketFeeConfig[] = [
   { marketCode: "coupang", marketLabel: "쿠팡", feeRate: 10.8 },
   { marketCode: "smartstore", marketLabel: "스마트스토어", feeRate: 5.5 },

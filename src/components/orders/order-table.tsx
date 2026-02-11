@@ -30,6 +30,8 @@ import { OrderDetailDialog } from "./order-detail-dialog";
 interface OrderTableProps {
   initialData: OrderListItem[];
   courierNamesByCode: Record<string, string>;
+  forwarderNamesByCode: Record<string, string>;
+  forwarderOptions: Array<{ code: string; name: string }>;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -94,7 +96,21 @@ function formatCourierLabel(code: string | null, courierNamesByCode: Record<stri
   return `${mapped} (${code})`;
 }
 
-export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps) {
+function formatForwarderLabel(code: string | null, forwarderNamesByCode: Record<string, string>) {
+  if (!code) return null;
+  const normalized = code.trim().toLowerCase();
+  const mapped = forwarderNamesByCode[normalized];
+  if (!mapped) return code;
+  if (mapped.toLowerCase() === normalized) return mapped;
+  return `${mapped} (${code})`;
+}
+
+export function OrderTable({
+  initialData,
+  courierNamesByCode,
+  forwarderNamesByCode,
+  forwarderOptions
+}: OrderTableProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -306,7 +322,7 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
         결제금액: order.totalPrice,
         해외주문번호: order.overseasOrderNumber ?? "",
         해외트래킹: order.overseasTrackingNumber ?? "",
-        포워더: order.forwarderId ?? "",
+        포워더: formatForwarderLabel(order.forwarderId, forwarderNamesByCode) ?? "",
         국내송장: order.trackingNumber ?? "",
         택배사: formatCourierLabel(order.courierCode, courierNamesByCode) ?? "",
       };
@@ -340,7 +356,7 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
       국내송장: o.trackingNumber ?? "",
       택배사: formatCourierLabel(o.courierCode, courierNamesByCode) ?? "",
       해외트래킹: o.overseasTrackingNumber ?? "",
-      포워더: o.forwarderId ?? "",
+      포워더: formatForwarderLabel(o.forwarderId, forwarderNamesByCode) ?? "",
       내부상태: statusLabel(o.internalStatus),
     }));
 
@@ -566,7 +582,7 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
                       <div className="space-y-0.5">
                         <p className="text-xs font-medium">{order.overseasTrackingNumber}</p>
                         <p className="text-xs text-muted-foreground">
-                          {order.forwarderId ?? "포워더 미입력"}
+                          {formatForwarderLabel(order.forwarderId, forwarderNamesByCode) ?? "포워더 미입력"}
                         </p>
                       </div>
                     ) : (
@@ -596,6 +612,8 @@ export function OrderTable({ initialData, courierNamesByCode }: OrderTableProps)
       <OrderDetailDialog
         orderId={detailOrderId}
         courierNamesByCode={courierNamesByCode}
+        forwarderNamesByCode={forwarderNamesByCode}
+        forwarderOptions={forwarderOptions}
         onClose={() => setDetailOrderId(null)}
       />
     </div>

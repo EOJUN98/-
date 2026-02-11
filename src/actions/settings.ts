@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { encryptSecret, decryptSecretIfNeeded } from "@/lib/security/crypto";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { MarketConfigSummary, SourcingConfig, MarketFeeConfig, CourierCompany } from "@/types/settings";
+import type { MarketConfigSummary, SourcingConfig, MarketFeeConfig, CourierCompany, ForwarderCompany } from "@/types/settings";
 import { DEFAULT_MARKET_FEES } from "@/types/settings";
 
 const saveMarketConfigSchema = z.object({
@@ -295,6 +295,109 @@ export async function saveDefaultCourierSettingAction(input: z.infer<typeof save
 
   revalidatePath("/settings");
   return { success: true as const, defaultCourierCode: nextCode };
+}
+
+// ── Forwarder Settings (Phase 7-3) ──
+
+interface ForwarderCompanyRow {
+  id: number;
+  code: string;
+  name: string;
+  homepage_url: string | null;
+  api_type: string | null;
+  is_active: boolean | null;
+}
+
+function mapForwarderRow(row: ForwarderCompanyRow): ForwarderCompany {
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    homepageUrl: row.homepage_url ?? null,
+    apiType: row.api_type ?? null,
+    isActive: Boolean(row.is_active ?? true),
+  };
+}
+
+export async function getForwarderCompanies(): Promise<{ data: ForwarderCompany[]; error?: string }> {
+  const supabase = createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { data: [], error: "로그인이 필요합니다" };
+  }
+
+  const { data, error } = await supabase
+    .from("forwarder_companies")
+    .select("id, code, name, homepage_url, api_type, is_active")
+    .order("id", { ascending: true });
+
+  if (error) return { data: [], error: error.message };
+
+  return { data: (data ?? []).map((row) => mapForwarderRow(row as ForwarderCompanyRow)) };
+}
+
+export async function getDefaultForwarderSetting(): Promise<{ data: { defaultForwarderCode: string | null }; error?: string }> {
+  const supabase = createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { data: { defaultForwarderCode: null }, error: "로그인이 필요합니다" };
+  }
+
+  const { data, error } = await supabase
+    .from("user_forwarder_settings")
+    .select("default_forwarder_code, created_at")
+    .eq("user_id", user.id)
+    .is("market_config_id", null)
+    .is("forwarder_code", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return { data: { defaultForwarderCode: null }, error: error.message };
+
+  return { data: { defaultForwarderCode: (data?.default_forwarder_code ?? null) as string | null } };
+}
+
+const saveDefaultForwarderSchema = z.object({
+  defaultForwarderCode: z.string().trim().max(30).nullable(),
+});
+
+export async function saveDefaultForwarderSettingAction(input: z.infer<typeof saveDefaultForwarderSchema>) {
+  const parsed = saveDefaultForwarderSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false as const, error: parsed.error.issues.map((i) => i.message).join(", ") };
+  }
+
+  const supabase = createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false as const, error: "로그인이 필요합니다" };
+
+  const nextCode = parsed.data.defaultForwarderCode ? parsed.data.defaultForwarderCode.trim() : null;
+
+  const { error: deleteError } = await supabase
+    .from("user_forwarder_settings")
+    .delete()
+    .eq("user_id", user.id)
+    .is("market_config_id", null)
+    .is("forwarder_code", null);
+
+  if (deleteError) return { success: false as const, error: deleteError.message };
+
+  if (!nextCode) {
+    revalidatePath("/settings");
+    return { success: true as const, defaultForwarderCode: null as string | null };
+  }
+
+  const { error: insertError } = await supabase
+    .from("user_forwarder_settings")
+    .insert({ user_id: user.id, default_forwarder_code: nextCode });
+
+  if (insertError) return { success: false as const, error: insertError.message };
+
+  revalidatePath("/settings");
+  return { success: true as const, defaultForwarderCode: nextCode };
 }
 
 // ── Sourcing Config ──

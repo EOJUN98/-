@@ -1,11 +1,12 @@
 import { OrderTable } from "@/components/orders/order-table";
 import { TrackingUpload } from "@/components/orders/tracking-upload";
-import { getCourierNameMapForDashboard, getOrdersForDashboard } from "@/lib/queries/orders";
+import { getCourierNameMapForDashboard, getForwarderMetaForDashboard, getOrdersForDashboard } from "@/lib/queries/orders";
 
 export default async function OrdersPage() {
-  const [{ data: orders, error }, { data: courierNamesByCode }] = await Promise.all([
+  const [{ data: orders, error }, { data: courierNamesByCode }, { data: forwarderMeta }] = await Promise.all([
     getOrdersForDashboard(),
     getCourierNameMapForDashboard(),
+    getForwarderMetaForDashboard(),
   ]);
 
   return (
@@ -24,7 +25,12 @@ export default async function OrdersPage() {
       ) : (
         <div className="space-y-4">
           <TrackingUpload />
-          <OrderTable initialData={orders} courierNamesByCode={courierNamesByCode} />
+          <OrderTable
+            initialData={orders}
+            courierNamesByCode={courierNamesByCode}
+            forwarderNamesByCode={forwarderMeta.nameMap}
+            forwarderOptions={forwarderMeta.options}
+          />
         </div>
       )}
     </section>
